@@ -5,6 +5,9 @@
 #include <QCamera>
 #include <QMediaCaptureSession>
 #include <QVideoWidget>
+#include <QVideoSink>
+#include <QVideoFrame>
+#include <QImage>
 
 class MediaEngine : public QObject
 {
@@ -17,11 +20,15 @@ public:
     bool startCamera();
     void stopCamera();
 
+    QImage convertFrame(const QVideoFrame &frame);
+    QImage getCurrentFrame();
+
 private:
     QCamera *camera;
     QMediaCaptureSession captureSession;
     QVideoWidget *videoWidget;
+    QVideoSink *videoSink;
+    QVideoFrame lastFrame;
 };
 
 #endif // MEDIAENGINE_H
-

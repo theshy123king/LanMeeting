@@ -4,7 +4,11 @@ MediaEngine::MediaEngine(QObject *parent)
     : QObject(parent)
     , camera(nullptr)
     , videoWidget(nullptr)
+    , videoSink(new QVideoSink(this))
 {
+    connect(videoSink, &QVideoSink::videoFrameChanged, this, [this](const QVideoFrame &frame) {
+        lastFrame = frame;
+    });
 }
 
 MediaEngine::~MediaEngine()
@@ -33,7 +37,7 @@ bool MediaEngine::startCamera()
     }
 
     captureSession.setCamera(camera);
-    captureSession.setVideoOutput(videoWidget);
+    captureSession.setVideoOutput(videoSink);
 
     camera->start();
     return camera->isActive();
@@ -46,3 +50,22 @@ void MediaEngine::stopCamera()
     }
 }
 
+QImage MediaEngine::convertFrame(const QVideoFrame &frame)
+{
+    if (!frame.isValid()) {
+        return QImage();
+    }
+
+    QVideoFrame copyFrame(frame);
+    QImage image = copyFrame.toImage();
+    if (image.isNull()) {
+        return QImage();
+    }
+
+    return image;
+}
+
+QImage MediaEngine::getCurrentFrame()
+{
+    return convertFrame(lastFrame);
+}
