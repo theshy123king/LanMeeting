@@ -9,6 +9,7 @@
 #include "media/MediaEngine.h"
 #include "audio/AudioEngine.h"
 #include "audio/AudioTransport.h"
+#include "media/MediaTransport.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -35,6 +36,7 @@ private:
     MediaEngine *media;
     AudioEngine *audio;
     AudioTransport *audioNet;
+    MediaTransport *videoNet;
 };
 
 #endif // MAINWINDOW_H

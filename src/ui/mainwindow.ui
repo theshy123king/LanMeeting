@@ -47,6 +47,11 @@
       <layout class="QVBoxLayout" name="videoLayout"/>
      </widget>
     </item>
+    <item>
+     <widget class="QWidget" name="remoteVideoContainer">
+      <layout class="QVBoxLayout" name="remoteVideoLayout"/>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">

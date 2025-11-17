@@ -12,6 +12,7 @@ MainWindow::MainWindow(QWidget *parent)
     , media(nullptr)
     , audio(nullptr)
     , audioNet(nullptr)
+    , videoNet(nullptr)
 {
     ui->setupUi(this);
 
@@ -34,11 +35,23 @@ MainWindow::MainWindow(QWidget *parent)
     audio->startPlayback();
 
     audioNet = new AudioTransport(audio, this);
+
+    videoNet = new MediaTransport(media, this);
+    QWidget *remoteView = videoNet->getRemoteVideoWidget();
+    if (ui->remoteVideoContainer && remoteView) {
+        auto *remoteLayout = qobject_cast<QVBoxLayout *>(ui->remoteVideoContainer->layout());
+        if (!remoteLayout) {
+            remoteLayout = new QVBoxLayout(ui->remoteVideoContainer);
+            ui->remoteVideoContainer->setLayout(remoteLayout);
+        }
+        remoteLayout->addWidget(remoteView);
+    }
 }
 
 MainWindow::~MainWindow()
 {
     delete media;
+    delete videoNet;
     delete audioNet;
     delete audio;
     delete server;
@@ -48,6 +61,10 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_btnCreateRoom_clicked()
 {
+    if (videoNet) {
+        videoNet->startTransport(7000, QStringLiteral("<client-ip-placeholder>"), 7001);
+    }
+
     if (audioNet) {
         audioNet->startTransport(6000, QStringLiteral("<client-ip-placeholder>"), 6001);
     }
@@ -84,6 +101,10 @@ void MainWindow::on_btnJoinRoom_clicked()
 
     if (audioNet) {
         audioNet->startTransport(6001, ip, 6000);
+    }
+
+    if (videoNet) {
+        videoNet->startTransport(7001, ip, 7000);
     }
 
     QMessageBox::information(this, "加入会议", "正在加入会议...");
