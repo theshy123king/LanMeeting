@@ -25,6 +25,10 @@ set(PROJECT_SOURCES
         src/audio/AudioEngine.h
         src/audio/AudioTransport.cpp
         src/audio/AudioTransport.h
+        src/media/VideoEncoder.cpp
+        src/media/VideoEncoder.h
+        src/media/VideoDecoder.cpp
+        src/media/VideoDecoder.h
         src/media/MediaTransport.cpp
         src/media/MediaTransport.h
         src/media/MediaEngine.cpp
