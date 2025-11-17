@@ -1,0 +1,40 @@
+# Build directories
+build/
+build-*/
+*/build/
+Desktop_Qt_*/
+
+# Qt Creator user data
+*.pro.user
+*.user
+*.user.*
+*.creator
+*.creator.user
+*.creator.user.*
+*.config
+*.qtc
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+*.cmake
+
+# Auto-generated Qt files
+*_autogen/
+moc_*.cpp
+*.moc
+qrc_*.cpp
+
+# Ninja
+.ninja_log
+.ninja_deps
+
+# Temp
+*.tmp
+*.temp
+*~
+*.bak
+*.swp
