@@ -76,11 +76,14 @@ if(ENABLE_FFMPEG)
     include_directories(${FFMPEG_INCLUDE_DIR})
     link_directories(${FFMPEG_LIB_DIR})
 
-    find_library(FFMPEG_AVCODEC avcodec HINTS ${FFMPEG_LIB_DIR})
-    find_library(FFMPEG_AVUTIL avutil HINTS ${FFMPEG_LIB_DIR})
-    find_library(FFMPEG_SWSCALE swscale HINTS ${FFMPEG_LIB_DIR})
+    # MinGW: explicitly look for import libraries lib*.dll.a
+    find_library(FFMPEG_AVCODEC NAMES libavcodec.dll.a   HINTS ${FFMPEG_LIB_DIR})
+    find_library(FFMPEG_AVFORMAT NAMES libavformat.dll.a HINTS ${FFMPEG_LIB_DIR})
+    find_library(FFMPEG_AVUTIL   NAMES libavutil.dll.a   HINTS ${FFMPEG_LIB_DIR})
+    find_library(FFMPEG_SWSCALE  NAMES libswscale.dll.a  HINTS ${FFMPEG_LIB_DIR})
+    find_library(FFMPEG_SWRESAMPLE NAMES libswresample.dll.a HINTS ${FFMPEG_LIB_DIR})
 
-    if(FFMPEG_AVCODEC AND FFMPEG_AVUTIL)
+    if(FFMPEG_AVCODEC AND FFMPEG_AVFORMAT AND FFMPEG_AVUTIL)
         set(FFMPEG_FOUND TRUE)
     else()
         set(FFMPEG_FOUND FALSE)
@@ -90,10 +93,14 @@ if(ENABLE_FFMPEG)
     if(FFMPEG_FOUND)
         target_link_libraries(LanMeeting PRIVATE
             ${FFMPEG_AVCODEC}
+            ${FFMPEG_AVFORMAT}
             ${FFMPEG_AVUTIL}
         )
         if(FFMPEG_SWSCALE)
             target_link_libraries(LanMeeting PRIVATE ${FFMPEG_SWSCALE})
+        endif()
+        if(FFMPEG_SWRESAMPLE)
+            target_link_libraries(LanMeeting PRIVATE ${FFMPEG_SWRESAMPLE})
         endif()
         target_compile_definitions(LanMeeting PRIVATE USE_FFMPEG_H264)
     endif()
