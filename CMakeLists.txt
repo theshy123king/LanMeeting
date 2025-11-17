@@ -21,6 +21,8 @@ set(PROJECT_SOURCES
         src/audio/AudioEngine.h
         src/audio/AudioTransport.cpp
         src/audio/AudioTransport.h
+        src/media/MediaTransport.cpp
+        src/media/MediaTransport.h
         src/media/MediaEngine.cpp
         src/media/MediaEngine.h
         src/net/ControlServer.cpp
