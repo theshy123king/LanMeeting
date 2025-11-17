@@ -22,7 +22,7 @@ public:
     void flush(QList<QByteArray> &outPackets);
 
 private:
-    AVCodec *codec;
+    const AVCodec *codec;
     AVCodecContext *ctx;
     AVPacket *pkt;
     int width;
@@ -31,4 +31,3 @@ private:
 };
 
 #endif // USE_FFMPEG_H264
-
