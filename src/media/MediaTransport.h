@@ -7,6 +7,11 @@
 #include <QString>
 #include <QLabel>
 
+#ifdef USE_FFMPEG_H264
+#include "media/VideoEncoder.h"
+#include "media/VideoDecoder.h"
+#endif
+
 class MediaEngine;
 
 class MediaTransport : public QObject
@@ -38,7 +43,13 @@ private:
     QWidget *remoteVideoWidget;
 
     MediaEngine *media;
+
+#ifdef USE_FFMPEG_H264
+    VideoEncoder *encoder;
+    VideoDecoder *decoder;
+    int videoWidth;
+    int videoHeight;
+#endif
 };
 
 #endif // MEDIATRANSPORT_H
-
