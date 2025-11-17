@@ -9,6 +9,10 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Optional FFmpeg root (for H.264 support)
+set(FFMPEG_ROOT "D:/dev/ffmpeg" CACHE PATH "Root directory of FFmpeg installation")
+option(ENABLE_FFMPEG "Enable FFmpeg-based H.264 encoding/decoding" ON)
+
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network Multimedia MultimediaWidgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Multimedia MultimediaWidgets)
 
@@ -60,6 +64,36 @@ target_link_libraries(LanMeeting PRIVATE
     Qt${QT_VERSION_MAJOR}::Multimedia
     Qt${QT_VERSION_MAJOR}::MultimediaWidgets
 )
+
+if(ENABLE_FFMPEG)
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_ROOT}/include")
+    set(FFMPEG_LIB_DIR "${FFMPEG_ROOT}/lib")
+
+    include_directories(${FFMPEG_INCLUDE_DIR})
+    link_directories(${FFMPEG_LIB_DIR})
+
+    find_library(FFMPEG_AVCODEC avcodec HINTS ${FFMPEG_LIB_DIR})
+    find_library(FFMPEG_AVUTIL avutil HINTS ${FFMPEG_LIB_DIR})
+    find_library(FFMPEG_SWSCALE swscale HINTS ${FFMPEG_LIB_DIR})
+
+    if(FFMPEG_AVCODEC AND FFMPEG_AVUTIL)
+        set(FFMPEG_FOUND TRUE)
+    else()
+        set(FFMPEG_FOUND FALSE)
+        message(WARNING "FFmpeg libraries not found in ${FFMPEG_LIB_DIR}. H.264 support will be disabled.")
+    endif()
+
+    if(FFMPEG_FOUND)
+        target_link_libraries(LanMeeting PRIVATE
+            ${FFMPEG_AVCODEC}
+            ${FFMPEG_AVUTIL}
+        )
+        if(FFMPEG_SWSCALE)
+            target_link_libraries(LanMeeting PRIVATE ${FFMPEG_SWSCALE})
+        endif()
+        target_compile_definitions(LanMeeting PRIVATE USE_FFMPEG_H264)
+    endif()
+endif()
 
 target_include_directories(LanMeeting PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
