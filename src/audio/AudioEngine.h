@@ -1,4 +1,4 @@
-﻿#ifndef AUDIOENGINE_H
+#ifndef AUDIOENGINE_H
 #define AUDIOENGINE_H
 
 #include <QObject>

@@ -1,6 +1,6 @@
 #include "ControlServer.h"
 
-#include <QDebug>
+#include "common/Logger.h"
 
 ControlServer::ControlServer(QObject *parent)
     : QObject(parent)
@@ -18,10 +18,11 @@ bool ControlServer::startServer(quint16 port)
 
     const bool ok = m_server->listen(QHostAddress::Any, port);
     if (!ok) {
-        qDebug() << "ControlServer failed to listen on port" << port
-                 << ":" << m_server->errorString();
+        LOG_ERROR(QStringLiteral("ControlServer failed to listen on port %1: %2")
+                      .arg(port)
+                      .arg(m_server->errorString()));
     } else {
-        qDebug() << "ControlServer listening on port" << port;
+        LOG_INFO(QStringLiteral("ControlServer listening on port %1").arg(port));
     }
     return ok;
 }
@@ -48,9 +49,9 @@ void ControlServer::onNewConnection()
         if (!socket)
             continue;
 
-        qDebug() << "ControlServer: client connected from"
-                 << socket->peerAddress().toString()
-                 << ":" << socket->peerPort();
+        LOG_INFO(QStringLiteral("ControlServer: client connected from %1:%2")
+                     .arg(socket->peerAddress().toString())
+                     .arg(socket->peerPort()));
 
         m_clients.append(socket);
         connect(socket, &QTcpSocket::readyRead,
@@ -66,12 +67,15 @@ void ControlServer::onReadyRead()
             continue;
 
         const QByteArray data = socket->readAll().trimmed();
-        qDebug() << "ControlServer received:" << data;
+        LOG_INFO(QStringLiteral("ControlServer received: %1")
+                     .arg(QString::fromUtf8(data)));
 
         if (data == "JOIN") {
             socket->write("OK");
             socket->flush();
+
+            const QString clientIp = socket->peerAddress().toString();
+            emit clientJoined(clientIp);
         }
     }
 }
-

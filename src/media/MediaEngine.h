@@ -1,10 +1,10 @@
-﻿#ifndef MEDIAENGINE_H
+#ifndef MEDIAENGINE_H
 #define MEDIAENGINE_H
 
 #include <QObject>
 #include <QCamera>
 #include <QMediaCaptureSession>
-#include <QVideoWidget>
+#include <QLabel>
 #include <QVideoSink>
 #include <QVideoFrame>
 #include <QImage>
@@ -26,7 +26,7 @@ public:
 private:
     QCamera *camera;
     QMediaCaptureSession captureSession;
-    QVideoWidget *videoWidget;
+    QLabel *previewLabel;
     QVideoSink *videoSink;
     QVideoFrame lastFrame;
 };

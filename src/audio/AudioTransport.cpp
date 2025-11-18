@@ -1,8 +1,9 @@
-﻿#include "AudioTransport.h"
+#include "AudioTransport.h"
 
 #include <QHostAddress>
 
 #include "AudioEngine.h"
+#include "common/Logger.h"
 
 AudioTransport::AudioTransport(AudioEngine *engine, QObject *parent)
     : QObject(parent)
@@ -32,6 +33,9 @@ bool AudioTransport::startTransport(quint16 localPortValue, const QString &remot
     remotePort = remotePortValue;
 
     if (!udpRecvSocket->bind(QHostAddress::AnyIPv4, localPort)) {
+        LOG_WARN(QStringLiteral("AudioTransport: failed to bind UDP port %1: %2")
+                     .arg(localPort)
+                     .arg(udpRecvSocket->errorString()));
         return false;
     }
 
@@ -64,7 +68,12 @@ void AudioTransport::onReadyRead()
     while (udpRecvSocket->hasPendingDatagrams()) {
         QByteArray buffer;
         buffer.resize(int(udpRecvSocket->pendingDatagramSize()));
-        udpRecvSocket->readDatagram(buffer.data(), buffer.size());
+        const qint64 read = udpRecvSocket->readDatagram(buffer.data(), buffer.size());
+        if (read <= 0) {
+            LOG_WARN(QStringLiteral("AudioTransport: failed to read UDP datagram - %1")
+                         .arg(udpRecvSocket->errorString()));
+            continue;
+        }
         if (!buffer.isEmpty()) {
             audio->playAudio(buffer);
         }
@@ -82,6 +91,11 @@ void AudioTransport::onSendTimer()
         return;
     }
 
-    udpSendSocket->writeDatagram(data, QHostAddress(remoteIp), remotePort);
+    const qint64 written = udpSendSocket->writeDatagram(data, QHostAddress(remoteIp), remotePort);
+    if (written < 0) {
+        LOG_WARN(QStringLiteral("AudioTransport: failed to send UDP datagram to %1:%2 - %3")
+                     .arg(remoteIp)
+                     .arg(remotePort)
+                     .arg(udpSendSocket->errorString()));
+    }
 }
-

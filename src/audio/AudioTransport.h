@@ -1,4 +1,4 @@
-﻿#ifndef AUDIOTRANSPORT_H
+#ifndef AUDIOTRANSPORT_H
 #define AUDIOTRANSPORT_H
 
 #include <QObject>

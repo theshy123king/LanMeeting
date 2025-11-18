@@ -1,4 +1,4 @@
-﻿#include "MediaTransport.h"
+#include "MediaTransport.h"
 
 #include <QBuffer>
 #include <QHostAddress>
@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 #include "MediaEngine.h"
+#include "common/Logger.h"
 
 MediaTransport::MediaTransport(MediaEngine *engine, QObject *parent)
     : QObject(parent)
@@ -53,6 +54,9 @@ bool MediaTransport::startTransport(quint16 localPortValue, const QString &remot
     remotePort = remotePortValue;
 
     if (!udpRecvSocket->bind(QHostAddress::AnyIPv4, localPort)) {
+        LOG_WARN(QStringLiteral("MediaTransport: failed to bind UDP port %1: %2")
+                     .arg(localPort)
+                     .arg(udpRecvSocket->errorString()));
         return false;
     }
 
@@ -71,12 +75,20 @@ bool MediaTransport::startTransport(quint16 localPortValue, const QString &remot
 
         if (!encoder) {
             encoder = new VideoEncoder();
-            encoder->init(videoWidth, videoHeight, AV_PIX_FMT_YUV420P);
+            if (!encoder->init(videoWidth, videoHeight, AV_PIX_FMT_YUV420P)) {
+                LOG_WARN(QStringLiteral("MediaTransport: failed to initialize H.264 encoder, falling back to JPEG transport"));
+                delete encoder;
+                encoder = nullptr;
+            }
         }
 
         if (!decoder) {
             decoder = new VideoDecoder();
-            decoder->init();
+            if (!decoder->init()) {
+                LOG_WARN(QStringLiteral("MediaTransport: failed to initialize H.264 decoder, falling back to JPEG transport"));
+                delete decoder;
+                decoder = nullptr;
+            }
         }
     }
 #endif
@@ -126,17 +138,13 @@ void MediaTransport::onSendTimer()
 
 #ifdef USE_FFMPEG_H264
     if (encoder && videoWidth > 0 && videoHeight > 0) {
-        QImage rgbImage = frame.convertToFormat(QImage::Format_RGBA8888);
+        QImage rgbFrame = frame.convertToFormat(QImage::Format_RGBA8888);
+        if (rgbFrame.isNull()) {
+            return;
+        }
 
         AVFrame *srcFrame = av_frame_alloc();
-        AVFrame *yuvFrame = av_frame_alloc();
-        if (!srcFrame || !yuvFrame) {
-            if (srcFrame) {
-                av_frame_free(&srcFrame);
-            }
-            if (yuvFrame) {
-                av_frame_free(&yuvFrame);
-            }
+        if (!srcFrame) {
             return;
         }
 
@@ -144,16 +152,21 @@ void MediaTransport::onSendTimer()
         srcFrame->width = videoWidth;
         srcFrame->height = videoHeight;
 
-        if (av_frame_get_buffer(srcFrame, 0) < 0) {
+        if (av_frame_get_buffer(srcFrame, 32) < 0) {
             av_frame_free(&srcFrame);
-            av_frame_free(&yuvFrame);
             return;
         }
 
         for (int y = 0; y < videoHeight; ++y) {
-            std::memcpy(srcFrame->data[0] + y * srcFrame->linesize[0],
-                        rgbImage.constScanLine(y),
-                        static_cast<size_t>(videoWidth * 4));
+            uint8_t *dstLine = srcFrame->data[0] + y * srcFrame->linesize[0];
+            const uint8_t *srcLine = rgbFrame.constScanLine(y);
+            std::memcpy(dstLine, srcLine, size_t(videoWidth) * 4);
+        }
+
+        AVFrame *yuvFrame = av_frame_alloc();
+        if (!yuvFrame) {
+            av_frame_free(&srcFrame);
+            return;
         }
 
         yuvFrame->format = AV_PIX_FMT_YUV420P;
@@ -198,7 +211,15 @@ void MediaTransport::onSendTimer()
 
         QByteArray packet;
         if (encoder->encodeFrame(yuvFrame, packet) && !packet.isEmpty()) {
-            udpSendSocket->writeDatagram(packet, QHostAddress(remoteIp), remotePort);
+            const qint64 written = udpSendSocket->writeDatagram(packet, QHostAddress(remoteIp), remotePort);
+            if (written < 0) {
+                LOG_WARN(QStringLiteral("MediaTransport: failed to send H.264 packet to %1:%2 - %3")
+                             .arg(remoteIp)
+                             .arg(remotePort)
+                             .arg(udpSendSocket->errorString()));
+            }
+        } else {
+            LOG_WARN(QStringLiteral("MediaTransport: encoder produced empty packet"));
         }
 
         av_frame_free(&yuvFrame);
@@ -215,7 +236,13 @@ void MediaTransport::onSendTimer()
     }
 
     if (!buffer.isEmpty()) {
-        udpSendSocket->writeDatagram(buffer, QHostAddress(remoteIp), remotePort);
+        const qint64 written = udpSendSocket->writeDatagram(buffer, QHostAddress(remoteIp), remotePort);
+        if (written < 0) {
+            LOG_WARN(QStringLiteral("MediaTransport: failed to send JPEG frame to %1:%2 - %3")
+                         .arg(remoteIp)
+                         .arg(remotePort)
+                         .arg(udpSendSocket->errorString()));
+        }
     }
 }
 
@@ -224,7 +251,12 @@ void MediaTransport::onReadyRead()
     while (udpRecvSocket->hasPendingDatagrams()) {
         QByteArray datagram;
         datagram.resize(int(udpRecvSocket->pendingDatagramSize()));
-        udpRecvSocket->readDatagram(datagram.data(), datagram.size());
+        const qint64 read = udpRecvSocket->readDatagram(datagram.data(), datagram.size());
+        if (read <= 0) {
+            LOG_WARN(QStringLiteral("MediaTransport: failed to read UDP datagram - %1")
+                         .arg(udpRecvSocket->errorString()));
+            continue;
+        }
 
 #ifdef USE_FFMPEG_H264
         if (decoder && !datagram.isEmpty()) {
@@ -282,4 +314,3 @@ void MediaTransport::onReadyRead()
         }
     }
 }
-

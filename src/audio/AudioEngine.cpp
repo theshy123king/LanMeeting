@@ -1,4 +1,6 @@
-﻿#include "AudioEngine.h"
+#include "AudioEngine.h"
+
+#include "common/Logger.h"
 
 AudioEngine::AudioEngine(QObject *parent)
     : QObject(parent)
@@ -27,7 +29,12 @@ bool AudioEngine::startCapture()
     audioSource = new QAudioSource(format, this);
     inputDevice = audioSource->start();
 
-    return inputDevice != nullptr;
+    if (!inputDevice) {
+        LOG_WARN(QStringLiteral("AudioEngine: failed to start audio capture"));
+        return false;
+    }
+
+    return true;
 }
 
 void AudioEngine::stopCapture()
@@ -49,7 +56,12 @@ bool AudioEngine::startPlayback()
     audioSink = new QAudioSink(format, this);
     outputDevice = audioSink->start();
 
-    return outputDevice != nullptr;
+    if (!outputDevice) {
+        LOG_WARN(QStringLiteral("AudioEngine: failed to start audio playback"));
+        return false;
+    }
+
+    return true;
 }
 
 void AudioEngine::stopPlayback()
@@ -79,4 +91,3 @@ void AudioEngine::playAudio(const QByteArray &data)
 
     outputDevice->write(data);
 }
-

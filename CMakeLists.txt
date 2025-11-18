@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(CMAKE_AUTOGEN_VERBOSE ON)
+
 project(LanMeeting VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
@@ -8,6 +10,8 @@ set(CMAKE_AUTORCC ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_CXX_COMPILER_ABI_FILE "${PROJECT_SOURCE_DIR}/cmake/CMakeCXXCompilerABI.cpp")
 
 # Optional FFmpeg root (for H.264 support)
 set(FFMPEG_ROOT "D:/dev/ffmpeg" CACHE PATH "Root directory of FFmpeg installation")
@@ -25,6 +29,8 @@ set(PROJECT_SOURCES
         src/audio/AudioEngine.h
         src/audio/AudioTransport.cpp
         src/audio/AudioTransport.h
+        src/common/Logger.cpp
+        src/common/Logger.h
         src/media/VideoEncoder.cpp
         src/media/VideoEncoder.h
         src/media/VideoDecoder.cpp
@@ -61,6 +67,8 @@ else()
         )
     endif()
 endif()
+
+target_compile_features(LanMeeting PRIVATE cxx_std_17)
 
 target_link_libraries(LanMeeting PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets

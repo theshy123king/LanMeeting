@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QMessageBox>
+#include <QLabel>
 
 #include "net/ControlServer.h"
 #include "net/ControlClient.h"
@@ -31,6 +32,7 @@ private slots:
 
 private:
     Ui::MainWindow *ui;
+    QLabel *statusLabel;
     ControlServer *server;
     ControlClient *client;
     MediaEngine *media;

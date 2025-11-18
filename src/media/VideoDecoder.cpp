@@ -1,4 +1,4 @@
-﻿#include "VideoDecoder.h"
+#include "VideoDecoder.h"
 
 #ifdef USE_FFMPEG_H264
 

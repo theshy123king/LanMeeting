@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifdef USE_FFMPEG_H264
 
@@ -19,7 +19,7 @@ public:
     bool decodePacket(const QByteArray &packet, AVFrame *outFrame);
 
 private:
-    AVCodec *codec;
+    const AVCodec *codec;
     AVCodecContext *ctx;
     AVPacket *pkt;
 };

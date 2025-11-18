@@ -1,4 +1,4 @@
-﻿#include "VideoEncoder.h"
+#include "VideoEncoder.h"
 
 #ifdef USE_FFMPEG_H264
 
@@ -9,6 +9,7 @@ VideoEncoder::VideoEncoder()
     , width(0)
     , height(0)
     , pixFmt(AV_PIX_FMT_YUV420P)
+    , ptsCounter(0)
 {
 #if LIBAVCODEC_VERSION_MAJOR < 58
     avcodec_register_all();
@@ -42,16 +43,20 @@ bool VideoEncoder::init(int w, int h, AVPixelFormat fmt)
     width = w;
     height = h;
     pixFmt = fmt;
+    ptsCounter = 0;
 
     ctx->width = width;
     ctx->height = height;
     ctx->pix_fmt = pixFmt;
     ctx->time_base = AVRational{1, 25};
+    ctx->framerate = AVRational{25, 1};
     ctx->bit_rate = 400000;
-    ctx->gop_size = 25;
-    ctx->max_b_frames = 2;
+    ctx->gop_size = 10;
+    ctx->max_b_frames = 0;
+    ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
 
-    av_opt_set(ctx->priv_data, "preset", "veryfast", 0);
+    av_opt_set(ctx->priv_data, "preset", "ultrafast", 0);
+    av_opt_set(ctx->priv_data, "tune", "zerolatency", 0);
 
     if (avcodec_open2(ctx, codec, nullptr) < 0) {
         avcodec_free_context(&ctx);
@@ -67,13 +72,17 @@ bool VideoEncoder::init(int w, int h, AVPixelFormat fmt)
     return true;
 }
 
-bool VideoEncoder::encodeFrame(const AVFrame *frame, QByteArray &outPacket)
+bool VideoEncoder::encodeFrame(AVFrame *frame, QByteArray &outPacket)
 {
     if (!ctx || !pkt) {
         return false;
     }
 
     outPacket.clear();
+
+    if (frame) {
+        frame->pts = ptsCounter++;
+    }
 
     if (avcodec_send_frame(ctx, frame) < 0) {
         return false;
@@ -123,4 +132,3 @@ void VideoEncoder::flush(QList<QByteArray> &outPackets)
 }
 
 #endif // USE_FFMPEG_H264
-

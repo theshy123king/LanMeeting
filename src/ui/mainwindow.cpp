@@ -4,6 +4,8 @@
 #include <QInputDialog>
 #include <QVBoxLayout>
 
+#include "common/Config.h"
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -15,6 +17,10 @@ MainWindow::MainWindow(QWidget *parent)
     , videoNet(nullptr)
 {
     ui->setupUi(this);
+
+    statusLabel = new QLabel(this);
+    statusLabel->setText("未连接");
+    statusBar()->addPermanentWidget(statusLabel);
 
     media = new MediaEngine(this);
     QWidget *preview = media->createPreviewWidget();
@@ -28,11 +34,17 @@ MainWindow::MainWindow(QWidget *parent)
         layout->addWidget(preview);
     }
 
-    media->startCamera();
+    if (!media->startCamera()) {
+        QMessageBox::warning(this, "视频错误", "无法启动摄像头，请检查设备权限或占用情况。");
+    }
 
     audio = new AudioEngine(this);
-    audio->startCapture();
-    audio->startPlayback();
+    if (!audio->startCapture()) {
+        QMessageBox::warning(this, "音频错误", "无法启动麦克风采集，请检查设备权限或占用情况。");
+    }
+    if (!audio->startPlayback()) {
+        QMessageBox::warning(this, "音频错误", "无法启动扬声器播放，请检查音频设备配置。");
+    }
 
     audioNet = new AudioTransport(audio, this);
 
@@ -61,22 +73,25 @@ MainWindow::~MainWindow()
 
 void MainWindow::on_btnCreateRoom_clicked()
 {
-    if (videoNet) {
-        videoNet->startTransport(7000, QStringLiteral("<client-ip-placeholder>"), 7001);
-    }
-
-    if (audioNet) {
-        audioNet->startTransport(6000, QStringLiteral("<client-ip-placeholder>"), 6001);
-    }
-
     if (!server) {
         server = new ControlServer(this);
+
+        connect(server, &ControlServer::clientJoined, this, [this](const QString &ip) {
+            if (audioNet && !audioNet->startTransport(Config::AUDIO_PORT_SEND, ip, Config::AUDIO_PORT_RECV)) {
+                QMessageBox::critical(this, "音频错误", "无法建立音频网络通道（端口可能被占用）。");
+            }
+            if (videoNet && !videoNet->startTransport(Config::VIDEO_PORT_SEND, ip, Config::VIDEO_PORT_RECV)) {
+                QMessageBox::critical(this, "视频错误", "无法建立视频网络通道（端口可能被占用）。");
+            }
+        });
     }
 
     if (server->startServer()) {
         QMessageBox::information(this, "创建会议", "会议已创建，等待其他客户端加入...");
+        statusLabel->setText("已创建会议，等待对端加入…");
     } else {
-        QMessageBox::warning(this, "创建会议", "无法创建会议服务器。");
+        QMessageBox::critical(this, "创建会议", "无法创建会议服务器（端口可能被占用）。");
+        statusLabel->setText("连接已断开");
     }
 }
 
@@ -95,17 +110,28 @@ void MainWindow::on_btnJoinRoom_clicked()
 
     if (!client) {
         client = new ControlClient(this);
+
+        connect(client, &ControlClient::errorOccurred, this, [this](const QString &msg) {
+            QMessageBox::critical(this, "加入会议失败", "控制连接出现错误：\n" + msg);
+            statusLabel->setText("连接已断开");
+        });
+
+        connect(client, &ControlClient::joined, this, [this]() {
+            statusBar()->showMessage("已成功加入会议。", 3000);
+            statusLabel->setText("已加入会议，正在通话");
+        });
     }
 
-    client->connectToHost(ip);
+    client->connectToHost(ip, Config::CONTROL_PORT);
 
-    if (audioNet) {
-        audioNet->startTransport(6001, ip, 6000);
+    if (audioNet && !audioNet->startTransport(Config::AUDIO_PORT_RECV, ip, Config::AUDIO_PORT_SEND)) {
+        QMessageBox::critical(this, "音频错误", "无法建立音频网络通道（端口可能被占用）。");
     }
 
-    if (videoNet) {
-        videoNet->startTransport(7001, ip, 7000);
+    if (videoNet && !videoNet->startTransport(Config::VIDEO_PORT_RECV, ip, Config::VIDEO_PORT_SEND)) {
+        QMessageBox::critical(this, "视频错误", "无法建立视频网络通道（端口可能被占用）。");
     }
 
-    QMessageBox::information(this, "加入会议", "正在加入会议...");
+    statusBar()->showMessage("正在加入会议...", 3000);
+    statusLabel->setText("正在加入会议...");
 }

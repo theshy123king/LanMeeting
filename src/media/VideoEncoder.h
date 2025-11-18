@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifdef USE_FFMPEG_H264
 
@@ -18,7 +18,7 @@ public:
     ~VideoEncoder();
 
     bool init(int width, int height, AVPixelFormat pixFmt = AV_PIX_FMT_YUV420P);
-    bool encodeFrame(const AVFrame *frame, QByteArray &outPacket);
+    bool encodeFrame(AVFrame *frame, QByteArray &outPacket);
     void flush(QList<QByteArray> &outPackets);
 
 private:
@@ -28,6 +28,7 @@ private:
     int width;
     int height;
     AVPixelFormat pixFmt;
+    int64_t ptsCounter;
 };
 
 #endif // USE_FFMPEG_H264

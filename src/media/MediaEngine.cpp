@@ -1,13 +1,24 @@
-﻿#include "MediaEngine.h"
+#include "MediaEngine.h"
+
+#include <QPixmap>
 
 MediaEngine::MediaEngine(QObject *parent)
     : QObject(parent)
     , camera(nullptr)
-    , videoWidget(nullptr)
+    , previewLabel(nullptr)
     , videoSink(new QVideoSink(this))
 {
     connect(videoSink, &QVideoSink::videoFrameChanged, this, [this](const QVideoFrame &frame) {
         lastFrame = frame;
+
+        if (previewLabel) {
+            const QImage image = convertFrame(frame);
+            if (!image.isNull()) {
+                previewLabel->setPixmap(QPixmap::fromImage(image).scaled(previewLabel->size(),
+                                                                         Qt::KeepAspectRatio,
+                                                                         Qt::SmoothTransformation));
+            }
+        }
     });
 }
 
@@ -15,25 +26,23 @@ MediaEngine::~MediaEngine()
 {
     stopCamera();
     delete camera;
-    delete videoWidget;
+    delete previewLabel;
 }
 
 QWidget *MediaEngine::createPreviewWidget()
 {
-    if (!videoWidget) {
-        videoWidget = new QVideoWidget;
+    if (!previewLabel) {
+        previewLabel = new QLabel;
+        previewLabel->setAlignment(Qt::AlignCenter);
+        previewLabel->setMinimumSize(320, 240);
     }
-    return videoWidget;
+    return previewLabel;
 }
 
 bool MediaEngine::startCamera()
 {
     if (!camera) {
         camera = new QCamera(this);
-    }
-
-    if (!videoWidget) {
-        videoWidget = new QVideoWidget;
     }
 
     captureSession.setCamera(camera);

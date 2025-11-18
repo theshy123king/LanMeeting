@@ -5,6 +5,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 
+#include "common/Config.h"
+
 class ControlServer : public QObject
 {
     Q_OBJECT
@@ -12,8 +14,11 @@ class ControlServer : public QObject
 public:
     explicit ControlServer(QObject *parent = nullptr);
 
-    bool startServer(quint16 port = 5000);
+    bool startServer(quint16 port = Config::CONTROL_PORT);
     void stopServer();
+
+signals:
+    void clientJoined(const QString &ip);
 
 private slots:
     void onNewConnection();
@@ -25,4 +30,3 @@ private:
 };
 
 #endif // CONTROLSERVER_H
-

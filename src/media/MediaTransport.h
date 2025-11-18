@@ -1,4 +1,4 @@
-﻿#ifndef MEDIATRANSPORT_H
+#ifndef MEDIATRANSPORT_H
 #define MEDIATRANSPORT_H
 
 #include <QObject>
@@ -53,3 +53,4 @@ private:
 };
 
 #endif // MEDIATRANSPORT_H
+
