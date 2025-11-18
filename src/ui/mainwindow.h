@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QLabel>
+#include <QPoint>
 
 #include "net/ControlServer.h"
 #include "net/ControlClient.h"
@@ -18,6 +19,13 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
+class QTimer;
+class QToolButton;
+class QWidget;
+class QEvent;
+class QResizeEvent;
+class QHBoxLayout;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -26,11 +34,22 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
+
 private slots:
     void on_btnCreateRoom_clicked();
     void on_btnJoinRoom_clicked();
 
 private:
+    void initLayout();
+    void initSidePanel();
+    void initFloatingControls();
+    void initPreviewWindow();
+    void updateOverlayGeometry();
+    void showControlBarTemporarily();
+
     Ui::MainWindow *ui;
     QLabel *statusLabel;
     ControlServer *server;
@@ -39,6 +58,15 @@ private:
     AudioEngine *audio;
     AudioTransport *audioNet;
     MediaTransport *videoNet;
+
+    QWidget *controlBar;
+    QToolButton *btnToggleSidePanel;
+    QTimer *controlBarHideTimer;
+    QWidget *controlsContainer;
+
+    bool isDraggingPreview;
+    QPoint previewDragStartPos;
+    QPoint previewStartPos;
 };
 
 #endif // MAINWINDOW_H
