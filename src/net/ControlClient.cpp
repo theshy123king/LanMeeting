@@ -51,6 +51,73 @@ void ControlClient::disconnectFromHost()
     m_socket->disconnectFromHost();
 }
 
+void ControlClient::createRoom(const QString &roomId)
+{
+    if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
+        LOG_WARN(QStringLiteral("ControlClient::createRoom called while socket is not connected"));
+        return;
+    }
+
+    const QString trimmedId = roomId.trimmed();
+    if (trimmedId.isEmpty()) {
+        LOG_WARN(QStringLiteral("ControlClient::createRoom called with empty roomId"));
+        emit protocolErrorReceived(QStringLiteral("房间 ID 不能为空"));
+        return;
+    }
+
+    const QByteArray data =
+        QByteArrayLiteral("CREATE_ROOM:") + trimmedId.toUtf8() + '\n';
+    const qint64 written = m_socket->write(data);
+    if (written < 0) {
+        LOG_WARN(QStringLiteral("ControlClient: failed to send CREATE_ROOM - %1")
+                     .arg(m_socket->errorString()));
+    } else {
+        LOG_INFO(QStringLiteral("ControlClient: sent CREATE_ROOM for \"%1\"").arg(trimmedId));
+    }
+}
+
+void ControlClient::joinRoom(const QString &roomId)
+{
+    if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
+        LOG_WARN(QStringLiteral("ControlClient::joinRoom called while socket is not connected"));
+        return;
+    }
+
+    const QString trimmedId = roomId.trimmed();
+    if (trimmedId.isEmpty()) {
+        LOG_WARN(QStringLiteral("ControlClient::joinRoom called with empty roomId"));
+        emit protocolErrorReceived(QStringLiteral("房间 ID 不能为空"));
+        return;
+    }
+
+    const QByteArray data =
+        QByteArrayLiteral("JOIN_ROOM:") + trimmedId.toUtf8() + '\n';
+    const qint64 written = m_socket->write(data);
+    if (written < 0) {
+        LOG_WARN(QStringLiteral("ControlClient: failed to send JOIN_ROOM - %1")
+                     .arg(m_socket->errorString()));
+    } else {
+        LOG_INFO(QStringLiteral("ControlClient: sent JOIN_ROOM for \"%1\"").arg(trimmedId));
+    }
+}
+
+void ControlClient::requestRoomList()
+{
+    if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
+        LOG_WARN(QStringLiteral("ControlClient::requestRoomList called while socket is not connected"));
+        return;
+    }
+
+    const QByteArray data = QByteArrayLiteral("ROOM_LIST\n");
+    const qint64 written = m_socket->write(data);
+    if (written < 0) {
+        LOG_WARN(QStringLiteral("ControlClient: failed to send ROOM_LIST - %1")
+                     .arg(m_socket->errorString()));
+    } else {
+        LOG_INFO(QStringLiteral("ControlClient: sent ROOM_LIST request"));
+    }
+}
+
 void ControlClient::onConnected()
 {
     LOG_INFO(QStringLiteral("ControlClient connected, sending JOIN"));
@@ -95,6 +162,41 @@ void ControlClient::onReadyRead()
             const QString msg = QString::fromUtf8(line.mid(5));
             LOG_INFO(QStringLiteral("ControlClient: chat received - %1").arg(msg));
             emit chatReceived(msg);
+        } else if (line.startsWith(QByteArrayLiteral("ROOM_LIST_RESULT:"))) {
+            const QByteArray prefix = QByteArrayLiteral("ROOM_LIST_RESULT:");
+            const QByteArray payload = line.mid(prefix.size());
+            const QString payloadStr = QString::fromUtf8(payload);
+            QStringList rooms;
+            const QStringList parts =
+                payloadStr.split(',', Qt::SkipEmptyParts);
+            for (const QString &part : parts) {
+                const QString id = part.trimmed();
+                if (!id.isEmpty()) {
+                    rooms.append(id);
+                }
+            }
+
+            LOG_INFO(QStringLiteral("ControlClient: received ROOM_LIST_RESULT (%1 rooms)")
+                         .arg(rooms.size()));
+            emit roomListReceived(rooms);
+        } else if (line.startsWith(QByteArrayLiteral("ERROR:"))) {
+            const QByteArray prefix = QByteArrayLiteral("ERROR:");
+            const QByteArray payload = line.mid(prefix.size());
+            const QString message = QString::fromUtf8(payload);
+            LOG_WARN(QStringLiteral("ControlClient: protocol ERROR - %1").arg(message));
+            emit protocolErrorReceived(message);
+        } else if (line.startsWith(QByteArrayLiteral("ROOM_CREATED:"))) {
+            const QByteArray prefix = QByteArrayLiteral("ROOM_CREATED:");
+            const QByteArray payload = line.mid(prefix.size());
+            const QString roomId = QString::fromUtf8(payload).trimmed();
+            LOG_INFO(QStringLiteral("ControlClient: ROOM_CREATED for \"%1\"").arg(roomId));
+            emit roomCreated(roomId);
+        } else if (line.startsWith(QByteArrayLiteral("ROOM_JOINED:"))) {
+            const QByteArray prefix = QByteArrayLiteral("ROOM_JOINED:");
+            const QByteArray payload = line.mid(prefix.size());
+            const QString roomId = QString::fromUtf8(payload).trimmed();
+            LOG_INFO(QStringLiteral("ControlClient: ROOM_JOINED for \"%1\"").arg(roomId));
+            emit roomJoined(roomId);
         }
     }
 }

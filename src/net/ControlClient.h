@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QTcpSocket>
+#include <QStringList>
 
 class QHostAddress;
 
@@ -17,11 +18,22 @@ public:
     void disconnectFromHost();
     void sendChatMessage(const QString &message);
 
+    // New room-level control commands
+    void createRoom(const QString &roomId);
+    void joinRoom(const QString &roomId);
+    void requestRoomList();
+
 signals:
     void joined();
     void errorOccurred(const QString &message);
     void disconnected();
     void chatReceived(const QString &message);
+
+    // Room-level callbacks
+    void roomCreated(const QString &roomId);
+    void roomJoined(const QString &roomId);
+    void roomListReceived(const QStringList &rooms);
+    void protocolErrorReceived(const QString &message);
 
 private slots:
     void onConnected();
