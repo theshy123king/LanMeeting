@@ -16,6 +16,7 @@
 #include "audio/AudioEngine.h"
 #include "audio/AudioTransport.h"
 #include "media/MediaTransport.h"
+#include "media/ScreenShareTransport.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -88,6 +89,7 @@ private:
     AudioEngine *audio;
     AudioTransport *audioNet;
     MediaTransport *videoNet;
+    ScreenShareTransport *screenShare;
 
     QWidget *controlBar;
     QToolButton *btnToggleSidePanel;
@@ -95,6 +97,7 @@ private:
     QToolButton *btnJoinRoom;
     QToolButton *btnLeaveRoom;
     QToolButton *btnMute;
+    QToolButton *btnScreenShare;
     QTimer *controlBarHideTimer;
     QWidget *controlsContainer;
 
