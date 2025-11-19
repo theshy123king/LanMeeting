@@ -20,6 +20,7 @@ class MediaTransport : public QObject
 
 public:
     explicit MediaTransport(MediaEngine *engine, QObject *parent = nullptr);
+    ~MediaTransport() override;
 
     bool startTransport(quint16 localPort, const QString &remoteIp, quint16 remotePort);
     void stopTransport();
@@ -53,4 +54,3 @@ private:
 };
 
 #endif // MEDIATRANSPORT_H
-

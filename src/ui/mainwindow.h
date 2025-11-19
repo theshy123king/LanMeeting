@@ -5,7 +5,9 @@
 #include <QMessageBox>
 #include <QLabel>
 #include <QPoint>
+#include <QStringList>
 
+#include "common/Logger.h"
 #include "net/ControlServer.h"
 #include "net/ControlClient.h"
 #include "media/MediaEngine.h"
@@ -34,6 +36,19 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    enum class MeetingRole {
+        None,
+        Host,
+        Guest
+    };
+
+    enum class MeetingState {
+        Idle,
+        WaitingPeer,
+        Connecting,
+        InMeeting
+    };
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -41,6 +56,8 @@ protected:
 private slots:
     void on_btnCreateRoom_clicked();
     void on_btnJoinRoom_clicked();
+    void on_btnLeaveRoom_clicked();
+    void on_btnSendChat_clicked();
 
 private:
     void initLayout();
@@ -49,6 +66,13 @@ private:
     void initPreviewWindow();
     void updateOverlayGeometry();
     void showControlBarTemporarily();
+    void appendLogMessage(const QString &message);
+    void resetMeetingState();
+    void startClientMediaTransports();
+    void updateControlsForMeetingState();
+    void updateMeetingStatusLabel();
+    void appendChatMessage(const QString &sender, const QString &message, bool isLocal);
+    void refreshParticipantListView();
 
     Ui::MainWindow *ui;
     QLabel *statusLabel;
@@ -61,12 +85,25 @@ private:
 
     QWidget *controlBar;
     QToolButton *btnToggleSidePanel;
+    QToolButton *btnCreateRoom;
+    QToolButton *btnJoinRoom;
+    QToolButton *btnLeaveRoom;
+    QToolButton *btnMute;
     QTimer *controlBarHideTimer;
     QWidget *controlsContainer;
 
     bool isDraggingPreview;
     QPoint previewDragStartPos;
     QPoint previewStartPos;
+
+    MeetingRole meetingRole;
+    MeetingState meetingState;
+    QString currentRemoteIp;
+    bool audioTransportActive;
+    bool videoTransportActive;
+    bool audioMuted;
+    int connectedClientCount;
+    QStringList participantNames;
 };
 
 #endif // MAINWINDOW_H

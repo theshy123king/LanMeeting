@@ -14,6 +14,7 @@ AudioTransport::AudioTransport(AudioEngine *engine, QObject *parent)
     , remotePort(0)
     , audio(engine)
     , sendTimer(new QTimer(this))
+    , muted(false)
 {
     sendTimer->setInterval(20);
     connect(sendTimer, &QTimer::timeout, this, &AudioTransport::onSendTimer);
@@ -24,7 +25,9 @@ AudioTransport::~AudioTransport()
     stopTransport();
 }
 
-bool AudioTransport::startTransport(quint16 localPortValue, const QString &remoteIpValue, quint16 remotePortValue)
+bool AudioTransport::startTransport(quint16 localPortValue,
+                                    const QString &remoteIpValue,
+                                    quint16 remotePortValue)
 {
     stopTransport();
 
@@ -52,11 +55,24 @@ void AudioTransport::stopTransport()
         sendTimer->stop();
     }
 
+    udpSendSocket->disconnect(this);
     if (udpRecvSocket->isOpen()) {
         udpRecvSocket->close();
     }
 
     udpRecvSocket->disconnect(this);
+
+    // Reset state so a future reconnection does not reuse stale address/port.
+    localPort = 0;
+    remotePort = 0;
+    remoteIp.clear();
+}
+
+void AudioTransport::setMuted(bool mutedValue)
+{
+    muted = mutedValue;
+    LOG_INFO(QStringLiteral("AudioTransport: mute state changed to %1")
+                 .arg(muted ? QStringLiteral("ON") : QStringLiteral("OFF")));
 }
 
 void AudioTransport::onReadyRead()
@@ -67,22 +83,38 @@ void AudioTransport::onReadyRead()
 
     while (udpRecvSocket->hasPendingDatagrams()) {
         QByteArray buffer;
-        buffer.resize(int(udpRecvSocket->pendingDatagramSize()));
+        const qint64 pendingSize = udpRecvSocket->pendingDatagramSize();
+        if (pendingSize <= 0) {
+            LOG_WARN(QStringLiteral("AudioTransport: pendingDatagramSize returned %1")
+                         .arg(pendingSize));
+            // Underlying buffer looks inconsistent; exit the loop to avoid spinning.
+            break;
+        }
+
+        buffer.resize(int(pendingSize));
         const qint64 read = udpRecvSocket->readDatagram(buffer.data(), buffer.size());
         if (read <= 0) {
             LOG_WARN(QStringLiteral("AudioTransport: failed to read UDP datagram - %1")
                          .arg(udpRecvSocket->errorString()));
             continue;
         }
-        if (!buffer.isEmpty()) {
-            audio->playAudio(buffer);
+
+        if (read < buffer.size()) {
+            buffer.resize(int(read));
         }
+
+        if (buffer.isEmpty()) {
+            LOG_WARN(QStringLiteral("AudioTransport: received empty UDP datagram"));
+            continue;
+        }
+
+        audio->playAudio(buffer);
     }
 }
 
 void AudioTransport::onSendTimer()
 {
-    if (!audio || remoteIp.isEmpty() || remotePort == 0) {
+    if (!audio || remoteIp.isEmpty() || remotePort == 0 || muted) {
         return;
     }
 
@@ -91,7 +123,8 @@ void AudioTransport::onSendTimer()
         return;
     }
 
-    const qint64 written = udpSendSocket->writeDatagram(data, QHostAddress(remoteIp), remotePort);
+    const qint64 written =
+        udpSendSocket->writeDatagram(data, QHostAddress(remoteIp), remotePort);
     if (written < 0) {
         LOG_WARN(QStringLiteral("AudioTransport: failed to send UDP datagram to %1:%2 - %3")
                      .arg(remoteIp)

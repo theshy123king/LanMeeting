@@ -39,10 +39,18 @@ MediaTransport::MediaTransport(MediaEngine *engine, QObject *parent)
 
     remoteVideoLabel->setAlignment(Qt::AlignCenter);
     remoteVideoLabel->setMinimumSize(320, 240);
+    remoteVideoLabel->setObjectName(QStringLiteral("remoteVideoLabel"));
+    remoteVideoLabel->setText(QStringLiteral("等待对端加入或开始发送视频..."));
 
     auto *layout = new QVBoxLayout(remoteVideoWidget);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(remoteVideoLabel);
+}
+
+MediaTransport::~MediaTransport()
+{
+    // 确保在销毁时停止定时器和关闭套接字，避免残留网络活动。
+    stopTransport();
 }
 
 bool MediaTransport::startTransport(quint16 localPortValue, const QString &remoteIpValue, quint16 remotePortValue)
@@ -93,6 +101,12 @@ bool MediaTransport::startTransport(quint16 localPortValue, const QString &remot
     }
 #endif
 
+    // 进入“通道已建立，等待对端视频”的占位状态。
+    if (remoteVideoLabel) {
+        remoteVideoLabel->setPixmap(QPixmap());
+        remoteVideoLabel->setText(QStringLiteral("通道已建立，等待对端视频..."));
+    }
+
     sendTimer->start();
 
     return true;
@@ -104,6 +118,7 @@ void MediaTransport::stopTransport()
         sendTimer->stop();
     }
 
+    udpSendSocket->disconnect(this);
     if (udpRecvSocket->isOpen()) {
         udpRecvSocket->close();
     }
@@ -118,6 +133,17 @@ void MediaTransport::stopTransport()
     videoWidth = 0;
     videoHeight = 0;
 #endif
+
+    // 重置端口与地址，避免下次启动时误用旧状态。
+    localPort = 0;
+    remotePort = 0;
+    remoteIp.clear();
+
+    // 恢复远端视频区域的占位画面，避免停会/断线后停留在最后一帧。
+    if (remoteVideoLabel) {
+        remoteVideoLabel->setPixmap(QPixmap());
+        remoteVideoLabel->setText(QStringLiteral("等待对端加入或开始发送视�?.."));
+    }
 }
 
 QWidget *MediaTransport::getRemoteVideoWidget()
@@ -250,11 +276,27 @@ void MediaTransport::onReadyRead()
 {
     while (udpRecvSocket->hasPendingDatagrams()) {
         QByteArray datagram;
-        datagram.resize(int(udpRecvSocket->pendingDatagramSize()));
+        const qint64 pendingSize = udpRecvSocket->pendingDatagramSize();
+        if (pendingSize <= 0) {
+            LOG_WARN(QStringLiteral("MediaTransport: pendingDatagramSize returned %1").arg(pendingSize));
+            // 出现此情况说明底层缓冲区状态异常，跳出读取循环避免死循环。
+            break;
+        }
+
+        datagram.resize(int(pendingSize));
         const qint64 read = udpRecvSocket->readDatagram(datagram.data(), datagram.size());
         if (read <= 0) {
             LOG_WARN(QStringLiteral("MediaTransport: failed to read UDP datagram - %1")
                          .arg(udpRecvSocket->errorString()));
+            continue;
+        }
+
+        if (read < datagram.size()) {
+            datagram.resize(int(read));
+        }
+
+        if (datagram.isEmpty()) {
+            LOG_WARN(QStringLiteral("MediaTransport: received empty UDP datagram"));
             continue;
         }
 
@@ -296,8 +338,14 @@ void MediaTransport::onReadyRead()
                         remoteVideoLabel->setPixmap(QPixmap::fromImage(image).scaled(remoteVideoLabel->size(),
                                                                                      Qt::KeepAspectRatio,
                                                                                      Qt::SmoothTransformation));
+                    } else {
+                        LOG_WARN(QStringLiteral("MediaTransport: decoded frame produced null image"));
                     }
+                } else {
+                    LOG_WARN(QStringLiteral("MediaTransport: failed to create sws context for decoded frame"));
                 }
+            } else {
+                LOG_WARN(QStringLiteral("MediaTransport: failed to decode H.264 packet (size=%1)").arg(datagram.size()));
             }
 
             av_frame_free(&frame);
@@ -306,7 +354,11 @@ void MediaTransport::onReadyRead()
 #endif
 
         QImage image;
-        image.loadFromData(datagram, "JPG");
+        if (!image.loadFromData(datagram, "JPG")) {
+            LOG_WARN(QStringLiteral("MediaTransport: failed to decode JPEG frame (size=%1)").arg(datagram.size()));
+            continue;
+        }
+
         if (!image.isNull()) {
             remoteVideoLabel->setPixmap(QPixmap::fromImage(image).scaled(remoteVideoLabel->size(),
                                                                          Qt::KeepAspectRatio,

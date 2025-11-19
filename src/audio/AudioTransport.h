@@ -18,6 +18,7 @@ public:
 
     bool startTransport(quint16 localPort, const QString &remoteIp, quint16 remotePort);
     void stopTransport();
+    void setMuted(bool muted);
 
 private slots:
     void onReadyRead();
@@ -31,7 +32,7 @@ private:
     quint16 remotePort;
     AudioEngine *audio;
     QTimer *sendTimer;
+    bool muted;
 };
 
 #endif // AUDIOTRANSPORT_H
-

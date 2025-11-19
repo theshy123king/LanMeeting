@@ -16,9 +16,12 @@ public:
 
     bool startServer(quint16 port = Config::CONTROL_PORT);
     void stopServer();
+    void sendChatToAll(const QString &message);
 
 signals:
     void clientJoined(const QString &ip);
+    void clientLeft(const QString &ip);
+    void chatReceived(const QString &ip, const QString &message);
 
 private slots:
     void onNewConnection();
