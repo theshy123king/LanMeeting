@@ -27,6 +27,8 @@ class QWidget;
 class QEvent;
 class QResizeEvent;
 class QHBoxLayout;
+class QListWidget;
+class QPushButton;
 
 class MainWindow : public QMainWindow
 {
@@ -92,6 +94,13 @@ private:
     QTimer *controlBarHideTimer;
     QWidget *controlsContainer;
 
+    // Room selection UI (side panel tab)
+    QWidget *roomTab;
+    QListWidget *roomListWidget;
+    QPushButton *btnRefreshRooms;
+    QPushButton *btnCreateRoomInTab;
+    QPushButton *btnJoinRoomInTab;
+
     bool isDraggingPreview;
     QPoint previewDragStartPos;
     QPoint previewStartPos;
@@ -99,6 +108,7 @@ private:
     MeetingRole meetingRole;
     MeetingState meetingState;
     QString currentRemoteIp;
+    QString currentRoomId;
     bool audioTransportActive;
     bool videoTransportActive;
     bool audioMuted;

@@ -16,9 +16,11 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QTextBrowser>
+#include <QPushButton>
+#include <QListWidget>
+#include <QTabWidget>
 
 #include "common/Config.h"
-
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -37,12 +39,18 @@ MainWindow::MainWindow(QWidget *parent)
     , btnMute(nullptr)
     , controlBarHideTimer(nullptr)
     , controlsContainer(nullptr)
+    , roomTab(nullptr)
+    , roomListWidget(nullptr)
+    , btnRefreshRooms(nullptr)
+    , btnCreateRoomInTab(nullptr)
+    , btnJoinRoomInTab(nullptr)
     , isDraggingPreview(false)
     , previewDragStartPos()
     , previewStartPos()
     , meetingRole(MeetingRole::None)
     , meetingState(MeetingState::Idle)
     , currentRemoteIp()
+    , currentRoomId()
     , audioTransportActive(false)
     , videoTransportActive(false)
     , audioMuted(false)
@@ -59,9 +67,9 @@ MainWindow::MainWindow(QWidget *parent)
     statusBar()->addPermanentWidget(statusLabel);
     updateMeetingStatusLabel();
 
-    appendLogMessage(QStringLiteral("应用启动，主窗口初始化"));
+    appendLogMessage(QStringLiteral("应用启动，主窗口初始化完成"));
 
-    // 本地预览
+    // 本地视频预览
     media = new MediaEngine(this);
     QWidget *preview = media->createPreviewWidget();
 
@@ -82,7 +90,7 @@ MainWindow::MainWindow(QWidget *parent)
                              QStringLiteral("无法启动摄像头，请检查设备权限或占用情况。"));
     }
 
-    // 音频初始化
+    // 本地音频采集和播放
     audio = new AudioEngine(this);
     if (!audio->startCapture()) {
         QMessageBox::warning(this,
@@ -97,7 +105,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     audioNet = new AudioTransport(audio, this);
 
-    // 远端视频
+    // 远端视频显示区域
     videoNet = new MediaTransport(media, this);
     QWidget *remoteView = videoNet->getRemoteVideoWidget();
     if (ui->remoteVideoContainer && remoteView) {
@@ -118,15 +126,18 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    appendLogMessage(QStringLiteral("主窗口销毁，开始清理资源"));
     resetMeetingState();
 
-    delete media;
+    if (server) {
+        server->stopServer();
+    }
+
+    delete server;
+    delete client;
     delete videoNet;
     delete audioNet;
     delete audio;
-    delete server;
-    delete client;
+    delete media;
     delete ui;
 }
 
@@ -204,6 +215,109 @@ void MainWindow::initSidePanel()
 
     if (ui->chkMuteOnJoin) {
         ui->chkMuteOnJoin->setText(QStringLiteral("加入时静音"));
+    }
+
+    // 动态添加“房间”选项卡，用于在加入会议前选择房间。
+    if (ui->sideTabWidget && !roomTab) {
+        roomTab = new QWidget(ui->sideTabWidget);
+        roomTab->setObjectName(QStringLiteral("roomTab"));
+
+        auto *layout = new QVBoxLayout(roomTab);
+        layout->setContentsMargins(4, 4, 4, 4);
+        layout->setSpacing(4);
+
+        auto *label = new QLabel(QStringLiteral("可用房间"), roomTab);
+        roomListWidget = new QListWidget(roomTab);
+        roomListWidget->setObjectName(QStringLiteral("roomListWidget"));
+
+        btnCreateRoomInTab = new QPushButton(QStringLiteral("创建房间"), roomTab);
+        btnJoinRoomInTab = new QPushButton(QStringLiteral("加入房间"), roomTab);
+        btnRefreshRooms = new QPushButton(QStringLiteral("刷新列表"), roomTab);
+
+        auto *buttonsLayout = new QHBoxLayout;
+        buttonsLayout->setContentsMargins(0, 0, 0, 0);
+        buttonsLayout->setSpacing(4);
+        buttonsLayout->addWidget(btnCreateRoomInTab);
+        buttonsLayout->addWidget(btnJoinRoomInTab);
+
+        layout->addWidget(label);
+        layout->addWidget(roomListWidget, 1);
+        layout->addLayout(buttonsLayout);
+        layout->addWidget(btnRefreshRooms);
+
+        ui->sideTabWidget->addTab(roomTab, QStringLiteral("房间"));
+
+        // 创建房间：输入房间 ID 后发送 CREATE_ROOM
+        connect(btnCreateRoomInTab, &QPushButton::clicked, this, [this]() {
+            if (!client) {
+                QMessageBox::information(this,
+                                         QStringLiteral("房间"),
+                                         QStringLiteral("尚未连接到会议服务器，请先点击“加入”连接主机。"));
+                return;
+            }
+
+            bool ok = false;
+            const QString roomId = QInputDialog::getText(this,
+                                                         QStringLiteral("创建房间"),
+                                                         QStringLiteral("请输入房间 ID:"),
+                                                         QLineEdit::Normal,
+                                                         QString(),
+                                                         &ok)
+                                   .trimmed();
+            if (!ok || roomId.isEmpty()) {
+                appendLogMessage(QStringLiteral("创建房间被取消（未输入有效房间 ID）"));
+                return;
+            }
+
+            appendLogMessage(QStringLiteral("请求创建房间：%1").arg(roomId));
+            client->createRoom(roomId);
+        });
+
+        // 加入房间：优先使用列表中当前选中项，否则让用户输入房间 ID
+        connect(btnJoinRoomInTab, &QPushButton::clicked, this, [this]() {
+            if (!client) {
+                QMessageBox::information(this,
+                                         QStringLiteral("房间"),
+                                         QStringLiteral("尚未连接到会议服务器，请先点击“加入”连接主机。"));
+                return;
+            }
+
+            QString roomId;
+            if (roomListWidget && roomListWidget->currentItem()) {
+                roomId = roomListWidget->currentItem()->text().trimmed();
+            }
+
+            if (roomId.isEmpty()) {
+                bool ok = false;
+                roomId = QInputDialog::getText(this,
+                                               QStringLiteral("加入房间"),
+                                               QStringLiteral("请输入房间 ID:"),
+                                               QLineEdit::Normal,
+                                               QString(),
+                                               &ok)
+                             .trimmed();
+                if (!ok || roomId.isEmpty()) {
+                    appendLogMessage(QStringLiteral("加入房间被取消（未选择或输入房间 ID）"));
+                    return;
+                }
+            }
+
+            appendLogMessage(QStringLiteral("请求加入房间：%1").arg(roomId));
+            client->joinRoom(roomId);
+        });
+
+        // 刷新房间列表
+        connect(btnRefreshRooms, &QPushButton::clicked, this, [this]() {
+            if (!client) {
+                QMessageBox::information(this,
+                                         QStringLiteral("房间"),
+                                         QStringLiteral("尚未连接到会议服务器，请先点击“加入”连接主机。"));
+                return;
+            }
+
+            appendLogMessage(QStringLiteral("请求刷新房间列表"));
+            client->requestRoomList();
+        });
     }
 }
 
@@ -291,6 +405,7 @@ void MainWindow::initFloatingControls()
     layout->addStretch();
 
     connect(btnMenu, &QAbstractButton::toggled, this, [this](bool checked) {
+        Q_UNUSED(checked);
         if (controlsContainer) {
             controlsContainer->setVisible(checked);
         }
@@ -385,10 +500,9 @@ void MainWindow::showControlBarTemporarily()
 
 void MainWindow::appendLogMessage(const QString &message)
 {
-    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("hh:mm:ss.zzz "));
+    const QString timestamp =
+        QDateTime::currentDateTime().toString(QStringLiteral("hh:mm:ss.zzz "));
     const QString line = timestamp + message;
-
-    LOG_INFO(line);
 
     if (ui && ui->logView) {
         ui->logView->appendPlainText(line);
@@ -417,9 +531,14 @@ void MainWindow::resetMeetingState()
     meetingRole = MeetingRole::None;
     meetingState = MeetingState::Idle;
     currentRemoteIp.clear();
+    currentRoomId.clear();
 
     participantNames.clear();
     refreshParticipantListView();
+
+    if (roomListWidget) {
+        roomListWidget->clear();
+    }
 }
 
 void MainWindow::startClientMediaTransports()
@@ -494,6 +613,21 @@ void MainWindow::updateControlsForMeetingState()
             ui->sidePanel->setVisible(true);
         }
     }
+
+    // 房间选择相关控件：仅在作为参会方且已开始连接服务器时可用（包括“连接中”和“已在会议中”）。
+    const bool roomUiEnabled = (meetingRole == MeetingRole::Guest) && !idle;
+    if (roomListWidget) {
+        roomListWidget->setEnabled(roomUiEnabled);
+    }
+    if (btnCreateRoomInTab) {
+        btnCreateRoomInTab->setEnabled(roomUiEnabled);
+    }
+    if (btnJoinRoomInTab) {
+        btnJoinRoomInTab->setEnabled(roomUiEnabled && !inMeeting);
+    }
+    if (btnRefreshRooms) {
+        btnRefreshRooms->setEnabled(roomUiEnabled);
+    }
 }
 
 void MainWindow::updateMeetingStatusLabel()
@@ -526,8 +660,14 @@ void MainWindow::updateMeetingStatusLabel()
         statusText = QStringLiteral("正在加入会议...");
         break;
     case MeetingState::InMeeting: {
-        int participants = 1 + connectedClientCount;
-        statusText = QStringLiteral("会议进行中（%1 人）").arg(participants);
+        const int participants = 1 + connectedClientCount;
+        if (currentRoomId.isEmpty()) {
+            statusText = QStringLiteral("会议进行中（%1 人）").arg(participants);
+        } else {
+            statusText = QStringLiteral("会议进行中 - 房间 %1（%2 人）")
+                             .arg(currentRoomId)
+                             .arg(participants);
+        }
         break;
     }
     }
@@ -693,7 +833,8 @@ void MainWindow::on_btnCreateRoom_clicked()
             if (videoNet) {
                 QWidget *remoteWidget = videoNet->getRemoteVideoWidget();
                 if (remoteWidget) {
-                    if (auto *label = remoteWidget->findChild<QLabel *>(QStringLiteral("remoteVideoLabel"))) {
+                    if (auto *label =
+                            remoteWidget->findChild<QLabel *>(QStringLiteral("remoteVideoLabel"))) {
                         label->setText(QStringLiteral("对端已加入，等待视频画面..."));
                     }
                 }
@@ -749,7 +890,7 @@ void MainWindow::on_btnCreateRoom_clicked()
         refreshParticipantListView();
 
         appendChatMessage(QStringLiteral("系统"),
-                          QStringLiteral("你创建了会议，等待参会者加入"),
+                          QStringLiteral("你创建了会议，等待参会者加入。"),
                           false);
 
         updateMeetingStatusLabel();
@@ -798,6 +939,13 @@ void MainWindow::on_btnJoinRoom_clicked()
 
     currentRemoteIp = ip;
 
+    if (ui->chkMuteOnJoin && ui->chkMuteOnJoin->isChecked()) {
+        audioMuted = true;
+        if (audioNet) {
+            audioNet->setMuted(true);
+        }
+    }
+
     if (!client) {
         client = new ControlClient(this);
 
@@ -809,8 +957,49 @@ void MainWindow::on_btnJoinRoom_clicked()
             resetMeetingState();
         });
 
+        // 与服务器握手成功（JOIN/OK 完成），进入“房间选择”阶段
         connect(client, &ControlClient::joined, this, [this]() {
-            statusBar()->showMessage(QStringLiteral("已成功加入会议。"), 3000);
+            statusBar()->showMessage(QStringLiteral("已连接到会议服务器，可以选择房间"), 3000);
+            appendLogMessage(QStringLiteral("控制连接握手成功，进入房间选择阶段"));
+
+            // 自动显示侧边栏并切换到“房间”选项卡
+            if (btnToggleSidePanel && ui->sidePanel) {
+                btnToggleSidePanel->setChecked(true);
+                ui->sidePanel->setVisible(true);
+            }
+            if (ui->sideTabWidget && roomTab) {
+                const int index = ui->sideTabWidget->indexOf(roomTab);
+                if (index >= 0) {
+                    ui->sideTabWidget->setCurrentIndex(index);
+                }
+            }
+
+            // 自动请求一次房间列表，方便用户直接选择
+            if (client) {
+                client->requestRoomList();
+            }
+
+            updateMeetingStatusLabel();
+            updateControlsForMeetingState();
+        });
+
+        // 成功创建房间：提示并默认自动加入该房间
+        connect(client, &ControlClient::roomCreated, this, [this](const QString &roomId) {
+            appendLogMessage(QStringLiteral("房间创建成功：%1").arg(roomId));
+            QMessageBox::information(this,
+                                     QStringLiteral("房间"),
+                                     QStringLiteral("房间 \"%1\" 创建成功，将自动加入该房间。").arg(roomId));
+
+            if (client) {
+                client->joinRoom(roomId);
+            }
+        });
+
+        // 成功加入房间：切换到已有的一对一会议逻辑
+        connect(client, &ControlClient::roomJoined, this, [this](const QString &roomId) {
+            currentRoomId = roomId;
+
+            statusBar()->showMessage(QStringLiteral("已加入房间：%1").arg(roomId), 3000);
 
             meetingRole = MeetingRole::Guest;
             meetingState = MeetingState::InMeeting;
@@ -820,12 +1009,38 @@ void MainWindow::on_btnJoinRoom_clicked()
             refreshParticipantListView();
 
             appendChatMessage(QStringLiteral("系统"),
-                              QStringLiteral("你已加入会议"),
+                              QStringLiteral("你已加入房间 %1").arg(roomId),
                               false);
 
-            appendLogMessage(QStringLiteral("控制连接握手成功，已加入会议"));
+            appendLogMessage(QStringLiteral("房间加入成功：%1，启动音视频通道").arg(roomId));
             startClientMediaTransports();
         });
+
+        // 收到房间列表结果：刷新房间列表界面
+        connect(client,
+                &ControlClient::roomListReceived,
+                this,
+                [this](const QStringList &rooms) {
+                    if (roomListWidget) {
+                        roomListWidget->clear();
+                        for (const QString &roomId : rooms) {
+                            roomListWidget->addItem(roomId);
+                        }
+                    }
+
+                    appendLogMessage(QStringLiteral("收到房间列表，共 %1 个房间").arg(rooms.size()));
+                });
+
+        // 协议级错误（如房间不存在、已存在等）
+        connect(client,
+                &ControlClient::protocolErrorReceived,
+                this,
+                [this](const QString &message) {
+                    QMessageBox::warning(this,
+                                         QStringLiteral("房间错误"),
+                                         message);
+                    appendLogMessage(QStringLiteral("房间协议错误：%1").arg(message));
+                });
 
         connect(client, &ControlClient::disconnected, this, [this]() {
             appendChatMessage(QStringLiteral("系统"),
