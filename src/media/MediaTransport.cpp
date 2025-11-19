@@ -40,7 +40,7 @@ MediaTransport::MediaTransport(MediaEngine *engine, QObject *parent)
     remoteVideoLabel->setAlignment(Qt::AlignCenter);
     remoteVideoLabel->setMinimumSize(320, 240);
     remoteVideoLabel->setObjectName(QStringLiteral("remoteVideoLabel"));
-    remoteVideoLabel->setText(QStringLiteral("等待对端加入或开始发送视频..."));
+    remoteVideoLabel->setText(QStringLiteral("Waiting for remote participant to join or start sending video..."));
 
     auto *layout = new QVBoxLayout(remoteVideoWidget);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -104,7 +104,7 @@ bool MediaTransport::startTransport(quint16 localPortValue, const QString &remot
     // 进入“通道已建立，等待对端视频”的占位状态。
     if (remoteVideoLabel) {
         remoteVideoLabel->setPixmap(QPixmap());
-        remoteVideoLabel->setText(QStringLiteral("通道已建立，等待对端视频..."));
+        remoteVideoLabel->setText(QStringLiteral("Channel established, waiting for remote video..."));
     }
 
     sendTimer->start();
@@ -180,7 +180,7 @@ void MediaTransport::stopTransport()
     // 恢复远端视频区域的占位画面，避免停会/断线后停留在最后一帧。
     if (remoteVideoLabel) {
         remoteVideoLabel->setPixmap(QPixmap());
-        remoteVideoLabel->setText(QStringLiteral("等待对端加入或开始发送视�?.."));
+        remoteVideoLabel->setText(QStringLiteral("Waiting for remote participant to join or start sending video..."));
     }
 }
 

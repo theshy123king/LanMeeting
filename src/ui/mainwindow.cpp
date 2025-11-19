@@ -85,21 +85,21 @@ MainWindow::MainWindow(QWidget *parent)
 
     if (!media->startCamera()) {
         QMessageBox::warning(this,
-                             QStringLiteral("视频错误"),
-                             QStringLiteral("无法启动摄像头，请检查设备权限或占用情况。"));
+                             QStringLiteral("Video error"),
+                             QStringLiteral("Unable to start camera. Please check device permissions or whether it is in use."));
     }
 
     // 本地音频采集和播放
     audio = new AudioEngine(this);
     if (!audio->startCapture()) {
         QMessageBox::warning(this,
-                             QStringLiteral("音频错误"),
-                             QStringLiteral("无法启动麦克风采集，请检查设备权限或占用情况。"));
+                             QStringLiteral("Audio error"),
+                             QStringLiteral("Unable to start microphone. Please check device permissions or whether it is in use."));
     }
     if (!audio->startPlayback()) {
         QMessageBox::warning(this,
-                             QStringLiteral("音频错误"),
-                             QStringLiteral("无法启动扬声器播放，请检查音频设备配置。"));
+                             QStringLiteral("Audio error"),
+                             QStringLiteral("Unable to start speaker playback. Please check audio device configuration."));
     }
 
     audioNet = new AudioTransport(audio, this);
@@ -177,37 +177,37 @@ void MainWindow::initSidePanel()
     if (ui->sideTabWidget) {
         const int chatIndex = ui->sideTabWidget->indexOf(ui->chatTab);
         if (chatIndex >= 0) {
-            ui->sideTabWidget->setTabText(chatIndex, QStringLiteral("聊天"));
+            ui->sideTabWidget->setTabText(chatIndex, QStringLiteral("Chat"));
         }
         const int participantsIndex = ui->sideTabWidget->indexOf(ui->participantsTab);
         if (participantsIndex >= 0) {
-            ui->sideTabWidget->setTabText(participantsIndex, QStringLiteral("参会者"));
+            ui->sideTabWidget->setTabText(participantsIndex, QStringLiteral("Participants"));
         }
         const int logIndex = ui->sideTabWidget->indexOf(ui->logTab);
         if (logIndex >= 0) {
-            ui->sideTabWidget->setTabText(logIndex, QStringLiteral("日志"));
+            ui->sideTabWidget->setTabText(logIndex, QStringLiteral("Log"));
         }
         const int settingsIndex = ui->sideTabWidget->indexOf(ui->settingsTab);
         if (settingsIndex >= 0) {
-            ui->sideTabWidget->setTabText(settingsIndex, QStringLiteral("设置"));
+            ui->sideTabWidget->setTabText(settingsIndex, QStringLiteral("Settings"));
         }
     }
 
     if (ui->labelSettings) {
-        ui->labelSettings->setText(QStringLiteral("通用设置"));
+        ui->labelSettings->setText(QStringLiteral("General"));
     }
     if (ui->chatLineEdit) {
-        ui->chatLineEdit->setPlaceholderText(QStringLiteral("输入消息..."));
+        ui->chatLineEdit->setPlaceholderText(QStringLiteral("Type a message..."));
     }
     if (ui->btnSendChat) {
-        ui->btnSendChat->setText(QStringLiteral("发送"));
+        ui->btnSendChat->setText(QStringLiteral("Send"));
     }
     if (ui->labelParticipants) {
-        ui->labelParticipants->setText(QStringLiteral("当前参会者"));
+        ui->labelParticipants->setText(QStringLiteral("Participants"));
     }
 
     if (ui->chkHideSelfView) {
-        ui->chkHideSelfView->setText(QStringLiteral("隐藏本地预览"));
+        ui->chkHideSelfView->setText(QStringLiteral("Hide self view"));
         ui->chkHideSelfView->setChecked(false);
         connect(ui->chkHideSelfView, &QCheckBox::toggled, this, [this](bool checked) {
             if (ui->videoContainer) {
@@ -218,7 +218,7 @@ void MainWindow::initSidePanel()
     }
 
     if (ui->chkMuteOnJoin) {
-        ui->chkMuteOnJoin->setText(QStringLiteral("加入时静音"));
+        ui->chkMuteOnJoin->setText(QStringLiteral("Mute on join"));
     }
 }
 
@@ -251,9 +251,9 @@ void MainWindow::initFloatingControls()
     layout->setContentsMargins(12, 4, 12, 4);
     layout->setSpacing(6);
 
-    // 主控制按钮：控制展开/收起其他功能按钮
+    // Main control button: toggle other controls
     auto *btnMenu = new QToolButton(controlBar);
-    btnMenu->setText(QStringLiteral("控制"));
+    btnMenu->setText(QStringLiteral("Controls"));
     btnMenu->setCheckable(true);
     layout->addWidget(btnMenu);
 
@@ -263,22 +263,22 @@ void MainWindow::initFloatingControls()
     controlsLayout->setSpacing(6);
 
     btnCreateRoom = new QToolButton(controlsContainer);
-    btnCreateRoom->setText(QStringLiteral("创建"));
+    btnCreateRoom->setText(QStringLiteral("Host"));
     controlsLayout->addWidget(btnCreateRoom);
     connect(btnCreateRoom, &QAbstractButton::clicked, this, &MainWindow::on_btnCreateRoom_clicked);
 
     btnJoinRoom = new QToolButton(controlsContainer);
-    btnJoinRoom->setText(QStringLiteral("加入"));
+    btnJoinRoom->setText(QStringLiteral("Join"));
     controlsLayout->addWidget(btnJoinRoom);
     connect(btnJoinRoom, &QAbstractButton::clicked, this, &MainWindow::on_btnJoinRoom_clicked);
 
     btnLeaveRoom = new QToolButton(controlsContainer);
-    btnLeaveRoom->setText(QStringLiteral("离开"));
+    btnLeaveRoom->setText(QStringLiteral("Leave"));
     controlsLayout->addWidget(btnLeaveRoom);
     connect(btnLeaveRoom, &QAbstractButton::clicked, this, &MainWindow::on_btnLeaveRoom_clicked);
 
     btnMute = new QToolButton(controlsContainer);
-    btnMute->setText(QStringLiteral("静音"));
+    btnMute->setText(QStringLiteral("Mute"));
     btnMute->setCheckable(true);
     controlsLayout->addWidget(btnMute);
     connect(btnMute, &QAbstractButton::toggled, this, [this](bool checked) {
@@ -286,12 +286,12 @@ void MainWindow::initFloatingControls()
         if (audioNet) {
             audioNet->setMuted(audioMuted);
         }
-        appendLogMessage(checked ? QStringLiteral("已开启静音（本地音频不再发送）")
-                                 : QStringLiteral("已关闭静音，恢复发送音频"));
+        appendLogMessage(checked ? QStringLiteral("Mute enabled (local audio will not be sent)")
+                                 : QStringLiteral("Mute disabled, local audio will be sent"));
     });
 
     btnScreenShare = new QToolButton(controlsContainer);
-    btnScreenShare->setText(QStringLiteral("屏幕共享"));
+    btnScreenShare->setText(QStringLiteral("Share Screen"));
     btnScreenShare->setCheckable(true);
     controlsLayout->addWidget(btnScreenShare);
     connect(btnScreenShare, &QAbstractButton::toggled, this, [this](bool checked) {
@@ -299,11 +299,10 @@ void MainWindow::initFloatingControls()
             return;
         }
         if (meetingRole != MeetingRole::Host) {
-            // 只有主持人可以开启屏幕共享
             btnScreenShare->setChecked(false);
             QMessageBox::information(this,
-                                     QStringLiteral("屏幕共享"),
-                                     QStringLiteral("只有主持人可以开启屏幕共享。"));
+                                     QStringLiteral("Screen sharing"),
+                                     QStringLiteral("Only the host can start screen sharing."));
             return;
         }
 
@@ -311,22 +310,22 @@ void MainWindow::initFloatingControls()
             screenShare->setDestinations(activeClientIps);
             if (!screenShare->startSender(Config::SCREEN_PORT_RECV)) {
                 QMessageBox::warning(this,
-                                     QStringLiteral("屏幕共享"),
-                                     QStringLiteral("无法开启屏幕共享，请检查网络端口是否被占用。"));
+                                     QStringLiteral("Screen sharing"),
+                                     QStringLiteral("Unable to start screen sharing. The UDP port may be in use."));
                 btnScreenShare->setChecked(false);
                 return;
             }
-            statusBar()->showMessage(QStringLiteral("屏幕共享已开启"), 3000);
+            statusBar()->showMessage(QStringLiteral("Screen sharing is ON"), 3000);
             appendLogMessage(QStringLiteral("主持人开启屏幕共享"));
         } else {
             screenShare->stopSender();
-            statusBar()->showMessage(QStringLiteral("屏幕共享已关闭"), 3000);
+            statusBar()->showMessage(QStringLiteral("Screen sharing is OFF"), 3000);
             appendLogMessage(QStringLiteral("主持人关闭屏幕共享"));
         }
     });
 
     btnToggleSidePanel = new QToolButton(controlsContainer);
-    btnToggleSidePanel->setText(QStringLiteral("侧边栏"));
+    btnToggleSidePanel->setText(QStringLiteral("Side panel"));
     btnToggleSidePanel->setCheckable(true);
     controlsLayout->addWidget(btnToggleSidePanel);
     connect(btnToggleSidePanel, &QAbstractButton::toggled, this, [this](bool checked) {
@@ -524,8 +523,8 @@ void MainWindow::startClientMediaTransports()
     } else {
         audioTransportActive = false;
         QMessageBox::critical(this,
-                              QStringLiteral("音频错误"),
-                              QStringLiteral("无法建立音频网络通道（端口可能被占用）。"));
+                              QStringLiteral("Audio error"),
+                              QStringLiteral("Failed to create audio network channel (port may be in use)."));
     }
 
     if (videoNet->startTransport(Config::VIDEO_PORT_RECV, currentRemoteIp, Config::VIDEO_PORT_SEND)) {
@@ -537,8 +536,8 @@ void MainWindow::startClientMediaTransports()
     } else {
         videoTransportActive = false;
         QMessageBox::critical(this,
-                              QStringLiteral("视频错误"),
-                              QStringLiteral("无法建立视频网络通道（端口可能被占用）。"));
+                              QStringLiteral("Video error"),
+                              QStringLiteral("Failed to create video network channel (port may be in use)."));
     }
 
     updateMeetingStatusLabel();
@@ -623,7 +622,7 @@ void MainWindow::initHostVideoReceiver()
                 label->setPixmap(QPixmap::fromImage(image).scaled(label->size(),
                                                                   Qt::KeepAspectRatio,
                                                                   Qt::SmoothTransformation));
-                label->setToolTip(QStringLiteral("来自：%1").arg(senderIp));
+                label->setToolTip(QStringLiteral("From: %1").arg(senderIp));
             }
         }
     });
@@ -777,25 +776,25 @@ void MainWindow::updateMeetingStatusLabel()
 
     switch (meetingState) {
     case MeetingState::Idle:
-        statusText = QStringLiteral("未连接");
+        statusText = QStringLiteral("Not connected");
         break;
     case MeetingState::WaitingPeer: {
         const int participants = 1 + connectedClientCount;
-        statusText = QStringLiteral("会议已创建，等待对端加入（当前 %1 人）").arg(participants);
+        statusText = QStringLiteral("Meeting created, waiting for participants (currently %1)").arg(participants);
         break;
     }
     case MeetingState::Connecting:
-        statusText = QStringLiteral("正在加入会议...");
+        statusText = QStringLiteral("Joining meeting...");
         break;
     case MeetingState::InMeeting: {
         const int participants = 1 + connectedClientCount;
-        statusText = QStringLiteral("会议进行中（%1 人）").arg(participants);
+        statusText = QStringLiteral("In meeting (%1 participants)").arg(participants);
         break;
     }
     }
 
     statusLabel->setText(statusText);
-    setWindowTitle(QStringLiteral("局域网会议 - %1").arg(statusText));
+    setWindowTitle(QStringLiteral("LAN Meeting - %1").arg(statusText));
 }
 
 void MainWindow::appendChatMessage(const QString &sender, const QString &message, bool isLocal)
@@ -907,8 +906,8 @@ void MainWindow::on_btnCreateRoom_clicked()
 
     if (meetingRole == MeetingRole::Guest) {
         QMessageBox::information(this,
-                                 QStringLiteral("创建会议"),
-                                 QStringLiteral("当前已作为参会方加入会议，请先离开当前会议再创建新会议。"));
+                                 QStringLiteral("Host meeting"),
+                                 QStringLiteral("You are already a participant. Leave the current meeting before hosting a new one."));
         appendLogMessage(QStringLiteral("创建会议被拒绝：当前处于参会方状态"));
         return;
     }
@@ -919,21 +918,21 @@ void MainWindow::on_btnCreateRoom_clicked()
         connect(server, &ControlServer::clientJoined, this, [this](const QString &ip) {
             appendLogMessage(QStringLiteral("控制连接收到客户端加入：%1").arg(ip));
 
-            const QString displayName = QStringLiteral("参会者（%1）").arg(ip);
+            const QString displayName = QStringLiteral("Participant (%1)").arg(ip);
             if (!participantNames.contains(displayName)) {
                 participantNames.append(displayName);
                 refreshParticipantListView();
             }
             activeClientIps.insert(ip);
 
-            appendChatMessage(QStringLiteral("系统"),
-                              QStringLiteral("%1 加入会议").arg(displayName),
+            appendChatMessage(QStringLiteral("System"),
+                              QStringLiteral("%1 joined the meeting").arg(displayName),
                               false);
 
             if (audioNet && !audioNet->startSendOnly(ip, Config::AUDIO_PORT_RECV)) {
                 QMessageBox::critical(this,
-                                      QStringLiteral("音频错误"),
-                                      QStringLiteral("无法建立音频网络通道（端口可能被占用）。"));
+                                      QStringLiteral("Audio error"),
+                                      QStringLiteral("Failed to create audio network channel (port may be in use)."));
                 audioTransportActive = false;
             } else if (audioNet) {
                 audioNet->setMuted(audioMuted);
@@ -942,8 +941,8 @@ void MainWindow::on_btnCreateRoom_clicked()
 
             if (videoNet && !videoNet->startSendOnly(ip, Config::VIDEO_PORT_RECV)) {
                 QMessageBox::critical(this,
-                                      QStringLiteral("视频错误"),
-                                      QStringLiteral("无法建立视频网络通道（端口可能被占用）。"));
+                                      QStringLiteral("Video error"),
+                                      QStringLiteral("Failed to create video network channel (port may be in use)."));
                 videoTransportActive = false;
             } else if (videoNet) {
                 videoTransportActive = true;
@@ -958,7 +957,7 @@ void MainWindow::on_btnCreateRoom_clicked()
                 if (remoteWidget) {
                     if (auto *label =
                             remoteWidget->findChild<QLabel *>(QStringLiteral("remoteVideoLabel"))) {
-                        label->setText(QStringLiteral("对端已加入，等待视频画面..."));
+                        label->setText(QStringLiteral("Remote participant joined, waiting for video..."));
                     }
                 }
             }
@@ -970,15 +969,15 @@ void MainWindow::on_btnCreateRoom_clicked()
         });
 
         connect(server, &ControlServer::clientLeft, this, [this](const QString &ip) {
-            const QString displayName = QStringLiteral("参会者（%1）").arg(ip);
+            const QString displayName = QStringLiteral("Participant (%1)").arg(ip);
             appendLogMessage(QStringLiteral("服务器检测到客户端离开：%1").arg(ip));
 
             participantNames.removeAll(displayName);
             refreshParticipantListView();
             activeClientIps.remove(ip);
 
-            appendChatMessage(QStringLiteral("系统"),
-                              QStringLiteral("%1 离开会议").arg(displayName),
+            appendChatMessage(QStringLiteral("System"),
+                              QStringLiteral("%1 left the meeting").arg(displayName),
                               false);
 
             // 停止当前音视频通道，保持会议继续处于“等待对端加入”状态
@@ -998,23 +997,23 @@ void MainWindow::on_btnCreateRoom_clicked()
 
         connect(server, &ControlServer::chatReceived, this, [this](const QString &ip, const QString &msg) {
             Q_UNUSED(ip);
-            appendChatMessage(QStringLiteral("对方"), msg, false);
+            appendChatMessage(QStringLiteral("Remote"), msg, false);
         });
     }
 
     if (server->startServer()) {
         QMessageBox::information(this,
-                                 QStringLiteral("创建会议"),
-                                 QStringLiteral("会议已创建，等待其他客户端加入..."));
+                                 QStringLiteral("Host meeting"),
+                                 QStringLiteral("Meeting created. Waiting for participants..."));
         meetingRole = MeetingRole::Host;
         meetingState = MeetingState::WaitingPeer;
 
         participantNames.clear();
-        participantNames << QStringLiteral("我（主持人）");
+        participantNames << QStringLiteral("Me (Host)");
         refreshParticipantListView();
 
-        appendChatMessage(QStringLiteral("系统"),
-                          QStringLiteral("你创建了会议，等待参会者加入。"),
+        appendChatMessage(QStringLiteral("System"),
+                          QStringLiteral("You created a meeting and are waiting for participants."),
                           false);
 
         updateMeetingStatusLabel();
@@ -1024,8 +1023,8 @@ void MainWindow::on_btnCreateRoom_clicked()
         initHostAudioMixer();
     } else {
         QMessageBox::critical(this,
-                              QStringLiteral("创建会议"),
-                              QStringLiteral("无法创建会议服务器（端口可能被占用）。"));
+                              QStringLiteral("Host meeting"),
+                              QStringLiteral("Failed to start meeting server (port may be in use)."));
         resetMeetingState();
         appendLogMessage(QStringLiteral("会议服务器启动失败，可能端口被占用"));
     }
@@ -1037,24 +1036,24 @@ void MainWindow::on_btnJoinRoom_clicked()
 
     if (meetingRole == MeetingRole::Host) {
         QMessageBox::information(this,
-                                 QStringLiteral("加入会议"),
-                                 QStringLiteral("当前已作为主持人创建会议，请先离开当前会议再加入其他会议。"));
+                                 QStringLiteral("Join meeting"),
+                                 QStringLiteral("You are hosting a meeting already. Leave the current meeting before joining another."));
         appendLogMessage(QStringLiteral("加入会议被拒绝：当前处于主持人状态"));
         return;
     }
 
     if (meetingState == MeetingState::Connecting || meetingState == MeetingState::InMeeting) {
         QMessageBox::information(this,
-                                 QStringLiteral("加入会议"),
-                                 QStringLiteral("当前已经在加入或通话中，无法重复加入。"));
+                                 QStringLiteral("Join meeting"),
+                                 QStringLiteral("You are already joining or in a meeting."));
         appendLogMessage(QStringLiteral("加入会议被拒绝：当前正在连接或已在会议中"));
         return;
     }
 
     bool ok = false;
     const QString ip = QInputDialog::getText(this,
-                                             QStringLiteral("加入会议"),
-                                             QStringLiteral("请输入主机 IP 地址:"),
+                                             QStringLiteral("Join meeting"),
+                                             QStringLiteral("Enter host IP address:"),
                                              QLineEdit::Normal,
                                              QStringLiteral("127.0.0.1"),
                                              &ok);
@@ -1077,24 +1076,24 @@ void MainWindow::on_btnJoinRoom_clicked()
 
         connect(client, &ControlClient::errorOccurred, this, [this](const QString &msg) {
             QMessageBox::critical(this,
-                                  QStringLiteral("加入会议失败"),
-                                  QStringLiteral("控制连接出现错误：\n%1").arg(msg));
+                                  QStringLiteral("Join failed"),
+                                  QStringLiteral("Control connection error:\n%1").arg(msg));
             appendLogMessage(QStringLiteral("控制连接错误：%1").arg(msg));
             resetMeetingState();
         });
 
         connect(client, &ControlClient::joined, this, [this]() {
-            statusBar()->showMessage(QStringLiteral("已成功加入会议。"), 3000);
+            statusBar()->showMessage(QStringLiteral("Successfully joined meeting."), 3000);
 
             meetingRole = MeetingRole::Guest;
             meetingState = MeetingState::InMeeting;
 
             participantNames.clear();
-            participantNames << QStringLiteral("我") << QStringLiteral("主持人");
+            participantNames << QStringLiteral("Me") << QStringLiteral("Host");
             refreshParticipantListView();
 
-            appendChatMessage(QStringLiteral("系统"),
-                              QStringLiteral("你已加入会议"),
+            appendChatMessage(QStringLiteral("System"),
+                              QStringLiteral("You joined the meeting"),
                               false);
 
             appendLogMessage(QStringLiteral("控制连接握手成功，已加入会议"));
@@ -1108,15 +1107,15 @@ void MainWindow::on_btnJoinRoom_clicked()
         });
 
         connect(client, &ControlClient::disconnected, this, [this]() {
-            appendChatMessage(QStringLiteral("系统"),
-                              QStringLiteral("与主持人的连接已断开"),
+            appendChatMessage(QStringLiteral("System"),
+                              QStringLiteral("Disconnected from host"),
                               false);
             appendLogMessage(QStringLiteral("检测到控制连接断开，重置会议状态"));
             resetMeetingState();
         });
 
         connect(client, &ControlClient::chatReceived, this, [this](const QString &msg) {
-            appendChatMessage(QStringLiteral("对方"), msg, false);
+            appendChatMessage(QStringLiteral("Remote"), msg, false);
         });
     }
 
@@ -1124,7 +1123,7 @@ void MainWindow::on_btnJoinRoom_clicked()
     meetingRole = MeetingRole::Guest;
     meetingState = MeetingState::Connecting;
 
-    statusBar()->showMessage(QStringLiteral("正在加入会议..."), 3000);
+    statusBar()->showMessage(QStringLiteral("Joining meeting..."), 3000);
     updateMeetingStatusLabel();
     updateControlsForMeetingState();
 }
@@ -1140,8 +1139,8 @@ void MainWindow::on_btnLeaveRoom_clicked()
 
     const QMessageBox::StandardButton reply =
         QMessageBox::question(this,
-                              QStringLiteral("离开会议"),
-                              QStringLiteral("确定要离开当前会议吗？"),
+                              QStringLiteral("Leave meeting"),
+                              QStringLiteral("Are you sure you want to leave this meeting?"),
                               QMessageBox::Yes | QMessageBox::No,
                               QMessageBox::Yes);
     if (reply != QMessageBox::Yes) {
@@ -1149,8 +1148,8 @@ void MainWindow::on_btnLeaveRoom_clicked()
         return;
     }
 
-    appendChatMessage(QStringLiteral("系统"),
-                      QStringLiteral("你已离开会议"),
+    appendChatMessage(QStringLiteral("System"),
+                      QStringLiteral("You left the meeting"),
                       false);
 
     if (meetingRole == MeetingRole::Host && server) {
@@ -1179,15 +1178,15 @@ void MainWindow::on_btnSendChat_clicked()
 
     if (meetingState != MeetingState::InMeeting) {
         QMessageBox::information(this,
-                                 QStringLiteral("聊天"),
-                                 QStringLiteral("当前不在会议中，无法发送聊天消息。"));
+                                 QStringLiteral("Chat"),
+                                 QStringLiteral("You are not in a meeting; cannot send messages."));
         appendLogMessage(QStringLiteral("尝试在非会议状态发送聊天消息：%1").arg(text));
         return;
     }
 
     ui->chatLineEdit->clear();
 
-    appendChatMessage(QStringLiteral("我"), text, true);
+    appendChatMessage(QStringLiteral("Me"), text, true);
 
     if (meetingRole == MeetingRole::Host && server) {
         server->sendChatToAll(text);
