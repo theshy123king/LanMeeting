@@ -4,7 +4,6 @@
 #include <QObject>
 #include <QTcpServer>
 #include <QTcpSocket>
-#include <QHash>
 
 #include "common/Config.h"
 
@@ -31,14 +30,6 @@ private slots:
 private:
     QTcpServer *m_server;
     QList<QTcpSocket *> m_clients;
-
-    // Room ID -> sockets in the room
-    QHash<QString, QList<QTcpSocket *>> m_rooms;
-    // Socket -> current room ID (empty if not in any room)
-    QHash<QTcpSocket *, QString> m_clientRooms;
-
-    void removeClientFromRoom(QTcpSocket *socket);
-    void sendError(QTcpSocket *socket, const QString &message);
 };
 
 #endif // CONTROLSERVER_H
