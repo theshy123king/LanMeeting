@@ -7,6 +7,7 @@
 #include <QPoint>
 #include <QStringList>
 #include <QHash>
+#include <QSet>
 
 #include "common/Logger.h"
 #include "net/ControlServer.h"
@@ -106,6 +107,7 @@ private:
     QHash<QString, QLabel *> hostVideoLabels;
     // Host-side multi-remote audio receiving & mixing
     QUdpSocket *hostAudioRecvSocket;
+    QSet<QString> activeClientIps;
 
     MeetingRole meetingRole;
     MeetingState meetingState;
