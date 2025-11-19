@@ -38,3 +38,8 @@ qrc_*.cpp
 *~
 *.bak
 *.swp
+
+# Local debug build and logs
+build_debug/
+build_output.txt
+log.txt

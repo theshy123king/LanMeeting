@@ -39,6 +39,8 @@ set(PROJECT_SOURCES
         src/media/MediaTransport.h
         src/media/MediaEngine.cpp
         src/media/MediaEngine.h
+        src/media/ScreenShareTransport.cpp
+        src/media/ScreenShareTransport.h
         src/net/ControlServer.cpp
         src/net/ControlServer.h
         src/net/ControlClient.cpp

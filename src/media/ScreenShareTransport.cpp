@@ -2,6 +2,8 @@
 
 #include <QBuffer>
 #include <QGuiApplication>
+#include <QHostAddress>
+#include <QImage>
 #include <QLabel>
 #include <QPixmap>
 #include <QScreen>
