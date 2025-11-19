@@ -49,6 +49,21 @@ bool AudioTransport::startTransport(quint16 localPortValue,
     return true;
 }
 
+bool AudioTransport::startSendOnly(const QString &remoteIpValue,
+                                   quint16 remotePortValue)
+{
+    // Only (re)configure the sending side; do not bind the receive socket.
+    stopTransport();
+
+    localPort = 0;
+    remoteIp = remoteIpValue;
+    remotePort = remotePortValue;
+
+    sendTimer->start();
+
+    return true;
+}
+
 void AudioTransport::stopTransport()
 {
     if (sendTimer->isActive()) {

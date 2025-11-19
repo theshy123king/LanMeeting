@@ -77,6 +77,7 @@ private:
     void appendChatMessage(const QString &sender, const QString &message, bool isLocal);
     void refreshParticipantListView();
     void initHostVideoReceiver();
+    void initHostAudioMixer();
 
     Ui::MainWindow *ui;
     QLabel *statusLabel;
@@ -103,6 +104,8 @@ private:
     // Host-side multi-remote video receiving
     QUdpSocket *hostVideoRecvSocket;
     QHash<QString, QLabel *> hostVideoLabels;
+    // Host-side multi-remote audio receiving & mixing
+    QUdpSocket *hostAudioRecvSocket;
 
     MeetingRole meetingRole;
     MeetingState meetingState;

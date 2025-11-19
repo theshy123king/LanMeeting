@@ -17,6 +17,9 @@ public:
     ~AudioTransport();
 
     bool startTransport(quint16 localPort, const QString &remoteIp, quint16 remotePort);
+    // Send-only mode: only transmit local audio to the given
+    // remote endpoint without binding a local receive port.
+    bool startSendOnly(const QString &remoteIp, quint16 remotePort);
     void stopTransport();
     void setMuted(bool muted);
 

@@ -17,6 +17,8 @@
 #include <QPlainTextEdit>
 #include <QTextBrowser>
 #include <QUdpSocket>
+#include <QHostAddress>
+#include <QVector>
 
 #include "common/Config.h"
 
@@ -39,6 +41,7 @@ MainWindow::MainWindow(QWidget *parent)
     , controlBarHideTimer(nullptr)
     , controlsContainer(nullptr)
     , hostVideoRecvSocket(nullptr)
+    , hostAudioRecvSocket(nullptr)
     , isDraggingPreview(false)
     , previewDragStartPos()
     , previewStartPos()
@@ -426,13 +429,19 @@ void MainWindow::resetMeetingState()
     participantNames.clear();
     refreshParticipantListView();
 
-    // 清理主持人端的多路远端视频接收资源
+    // 清理主持人端的多路远端视频/音频接收资源
     if (hostVideoRecvSocket) {
         hostVideoRecvSocket->close();
         hostVideoRecvSocket->deleteLater();
         hostVideoRecvSocket = nullptr;
     }
     hostVideoLabels.clear();
+
+    if (hostAudioRecvSocket) {
+        hostAudioRecvSocket->close();
+        hostAudioRecvSocket->deleteLater();
+        hostAudioRecvSocket = nullptr;
+    }
 
     if (ui->remoteVideoContainer) {
         if (auto *layout = ui->remoteVideoContainer->layout()) {
@@ -566,6 +575,92 @@ void MainWindow::initHostVideoReceiver()
                 label->setToolTip(QStringLiteral("来自：%1").arg(senderIp));
             }
         }
+    });
+}
+
+// Host-side: lazily create and bind the UDP socket used to receive
+// audio frames from all connected participants and perform a simple
+// mixing before sending to AudioEngine for playback.
+void MainWindow::initHostAudioMixer()
+{
+    if (hostAudioRecvSocket) {
+        return;
+    }
+
+    hostAudioRecvSocket = new QUdpSocket(this);
+    if (!hostAudioRecvSocket->bind(QHostAddress::AnyIPv4, Config::AUDIO_PORT_SEND)) {
+        appendLogMessage(QStringLiteral("主持人端音频接收端口绑定失败，无法接收远端音频"));
+        hostAudioRecvSocket->deleteLater();
+        hostAudioRecvSocket = nullptr;
+        return;
+    }
+
+    connect(hostAudioRecvSocket, &QUdpSocket::readyRead, this, [this]() {
+        if (!audio) {
+            // 没有音频引擎就无法播放，直接丢弃。
+            while (hostAudioRecvSocket && hostAudioRecvSocket->hasPendingDatagrams()) {
+                QByteArray tmp;
+                tmp.resize(int(hostAudioRecvSocket->pendingDatagramSize()));
+                hostAudioRecvSocket->readDatagram(tmp.data(), tmp.size());
+            }
+            return;
+        }
+
+        // 一次 readyRead 内将当前所有待处理的数据包进行简单叠加混音。
+        QVector<QByteArray> packets;
+        qint64 maxSize = 0;
+
+        while (hostAudioRecvSocket && hostAudioRecvSocket->hasPendingDatagrams()) {
+            QByteArray datagram;
+            datagram.resize(int(hostAudioRecvSocket->pendingDatagramSize()));
+            QHostAddress senderAddr;
+            quint16 senderPort = 0;
+            const qint64 read =
+                hostAudioRecvSocket->readDatagram(datagram.data(), datagram.size(), &senderAddr, &senderPort);
+            if (read <= 0) {
+                appendLogMessage(QStringLiteral("读取远端音频数据失败：%1")
+                                     .arg(hostAudioRecvSocket->errorString()));
+                continue;
+            }
+            if (read < datagram.size()) {
+                datagram.resize(int(read));
+            }
+            if (datagram.isEmpty()) {
+                continue;
+            }
+            packets.push_back(datagram);
+            if (datagram.size() > maxSize) {
+                maxSize = datagram.size();
+            }
+        }
+
+        if (packets.isEmpty() || maxSize <= 0) {
+            return;
+        }
+
+        // 混音：将所有 16bit 单声道 PCM 流简单求和并截断到 int16 范围。
+        QByteArray mixed;
+        mixed.resize(int(maxSize));
+        mixed.fill(0);
+
+        const int sampleCount = mixed.size() / 2;
+        auto *mixedSamples = reinterpret_cast<qint16 *>(mixed.data());
+
+        for (const QByteArray &packet : packets) {
+            const int count = qMin(sampleCount, packet.size() / 2);
+            const auto *srcSamples = reinterpret_cast<const qint16 *>(packet.constData());
+            for (int i = 0; i < count; ++i) {
+                int sum = int(mixedSamples[i]) + int(srcSamples[i]);
+                if (sum > 32767) {
+                    sum = 32767;
+                } else if (sum < -32768) {
+                    sum = -32768;
+                }
+                mixedSamples[i] = qint16(sum);
+            }
+        }
+
+        audio->playAudio(mixed);
     });
 }
 
@@ -775,7 +870,7 @@ void MainWindow::on_btnCreateRoom_clicked()
                               QStringLiteral("%1 加入会议").arg(displayName),
                               false);
 
-            if (audioNet && !audioNet->startTransport(Config::AUDIO_PORT_SEND, ip, Config::AUDIO_PORT_RECV)) {
+            if (audioNet && !audioNet->startSendOnly(ip, Config::AUDIO_PORT_RECV)) {
                 QMessageBox::critical(this,
                                       QStringLiteral("音频错误"),
                                       QStringLiteral("无法建立音频网络通道（端口可能被占用）。"));
@@ -865,6 +960,7 @@ void MainWindow::on_btnCreateRoom_clicked()
         updateControlsForMeetingState();
         appendLogMessage(QStringLiteral("会议服务器已启动，等待客户端连接"));
         initHostVideoReceiver();
+        initHostAudioMixer();
     } else {
         QMessageBox::critical(this,
                               QStringLiteral("创建会议"),
