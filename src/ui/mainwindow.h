@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QPoint>
 #include <QStringList>
+#include <QHash>
 
 #include "common/Logger.h"
 #include "net/ControlServer.h"
@@ -27,6 +28,8 @@ class QWidget;
 class QEvent;
 class QResizeEvent;
 class QHBoxLayout;
+class QUdpSocket;
+class QLabel;
 
 class MainWindow : public QMainWindow
 {
@@ -73,6 +76,7 @@ private:
     void updateMeetingStatusLabel();
     void appendChatMessage(const QString &sender, const QString &message, bool isLocal);
     void refreshParticipantListView();
+    void initHostVideoReceiver();
 
     Ui::MainWindow *ui;
     QLabel *statusLabel;
@@ -95,6 +99,10 @@ private:
     bool isDraggingPreview;
     QPoint previewDragStartPos;
     QPoint previewStartPos;
+
+    // Host-side multi-remote video receiving
+    QUdpSocket *hostVideoRecvSocket;
+    QHash<QString, QLabel *> hostVideoLabels;
 
     MeetingRole meetingRole;
     MeetingState meetingState;

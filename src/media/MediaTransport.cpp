@@ -112,6 +112,44 @@ bool MediaTransport::startTransport(quint16 localPortValue, const QString &remot
     return true;
 }
 
+bool MediaTransport::startSendOnly(const QString &remoteIpValue, quint16 remotePortValue)
+{
+    // Send-only mode: we do not bind the receive socket,
+    // so this transport instance will only push local video
+    // frames to the given remote endpoint.
+    stopTransport();
+
+    localPort = 0;
+    remoteIp = remoteIpValue;
+    remotePort = remotePortValue;
+
+#ifdef USE_FFMPEG_H264
+    if (media) {
+        const QImage frame = media->getCurrentFrame();
+        if (!frame.isNull()) {
+            videoWidth = frame.width();
+            videoHeight = frame.height();
+        } else {
+            videoWidth = 640;
+            videoHeight = 480;
+        }
+
+        if (!encoder) {
+            encoder = new VideoEncoder();
+            if (!encoder->init(videoWidth, videoHeight, AV_PIX_FMT_YUV420P)) {
+                LOG_WARN(QStringLiteral("MediaTransport: failed to initialize H.264 encoder for send-only mode, falling back to JPEG transport"));
+                delete encoder;
+                encoder = nullptr;
+            }
+        }
+    }
+#endif
+
+    sendTimer->start();
+
+    return true;
+}
+
 void MediaTransport::stopTransport()
 {
     if (sendTimer->isActive()) {

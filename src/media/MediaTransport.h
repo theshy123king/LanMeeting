@@ -23,6 +23,9 @@ public:
     ~MediaTransport() override;
 
     bool startTransport(quint16 localPort, const QString &remoteIp, quint16 remotePort);
+    // Send-only mode: used when we only need to push local video to a remote
+    // endpoint without receiving remote video on this transport instance.
+    bool startSendOnly(const QString &remoteIp, quint16 remotePort);
     void stopTransport();
 
     QWidget *getRemoteVideoWidget();

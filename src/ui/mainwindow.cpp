@@ -16,7 +16,10 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QTextBrowser>
+#include <QUdpSocket>
+
 #include "common/Config.h"
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -35,6 +38,7 @@ MainWindow::MainWindow(QWidget *parent)
     , btnMute(nullptr)
     , controlBarHideTimer(nullptr)
     , controlsContainer(nullptr)
+    , hostVideoRecvSocket(nullptr)
     , isDraggingPreview(false)
     , previewDragStartPos()
     , previewStartPos()
@@ -421,6 +425,25 @@ void MainWindow::resetMeetingState()
 
     participantNames.clear();
     refreshParticipantListView();
+
+    // 清理主持人端的多路远端视频接收资源
+    if (hostVideoRecvSocket) {
+        hostVideoRecvSocket->close();
+        hostVideoRecvSocket->deleteLater();
+        hostVideoRecvSocket = nullptr;
+    }
+    hostVideoLabels.clear();
+
+    if (ui->remoteVideoContainer) {
+        if (auto *layout = ui->remoteVideoContainer->layout()) {
+            while (QLayoutItem *item = layout->takeAt(0)) {
+                if (QWidget *w = item->widget()) {
+                    w->deleteLater();
+                }
+                delete item;
+            }
+        }
+    }
 }
 
 void MainWindow::startClientMediaTransports()
@@ -460,6 +483,90 @@ void MainWindow::startClientMediaTransports()
 
     updateMeetingStatusLabel();
     updateControlsForMeetingState();
+}
+
+// Host-side: lazily create and bind the UDP socket used to receive
+// video frames from all connected participants.
+static constexpr int kHostVideoThumbWidth  = 160;
+static constexpr int kHostVideoThumbHeight = 120;
+
+void MainWindow::initHostVideoReceiver()
+{
+    if (hostVideoRecvSocket) {
+        return;
+    }
+
+    hostVideoRecvSocket = new QUdpSocket(this);
+    if (!hostVideoRecvSocket->bind(QHostAddress::AnyIPv4, Config::VIDEO_PORT_SEND)) {
+        appendLogMessage(QStringLiteral("主持人端视频接收端口绑定失败，无法接收远端视频"));
+        hostVideoRecvSocket->deleteLater();
+        hostVideoRecvSocket = nullptr;
+        return;
+    }
+
+    connect(hostVideoRecvSocket, &QUdpSocket::readyRead, this, [this]() {
+        while (hostVideoRecvSocket && hostVideoRecvSocket->hasPendingDatagrams()) {
+            QByteArray datagram;
+            datagram.resize(int(hostVideoRecvSocket->pendingDatagramSize()));
+
+            QHostAddress senderAddr;
+            quint16 senderPort = 0;
+            const qint64 read =
+                hostVideoRecvSocket->readDatagram(datagram.data(), datagram.size(), &senderAddr, &senderPort);
+            if (read <= 0) {
+                appendLogMessage(QStringLiteral("读取远端视频数据失败：%1")
+                                     .arg(hostVideoRecvSocket->errorString()));
+                continue;
+            }
+
+            if (read < datagram.size()) {
+                datagram.resize(int(read));
+            }
+
+            if (datagram.isEmpty()) {
+                continue;
+            }
+
+            const QString senderIp = senderAddr.toString();
+
+            if (!ui->remoteVideoContainer) {
+                continue;
+            }
+
+            QLabel *label = hostVideoLabels.value(senderIp, nullptr);
+            if (!label) {
+                auto *layout = qobject_cast<QVBoxLayout *>(ui->remoteVideoContainer->layout());
+                if (!layout) {
+                    layout = new QVBoxLayout(ui->remoteVideoContainer);
+                    ui->remoteVideoContainer->setLayout(layout);
+                    layout->setContentsMargins(0, 0, 0, 0);
+                    layout->setSpacing(4);
+                }
+
+                label = new QLabel(ui->remoteVideoContainer);
+                label->setMinimumSize(kHostVideoThumbWidth, kHostVideoThumbHeight);
+                label->setAlignment(Qt::AlignCenter);
+                label->setStyleSheet(
+                    QStringLiteral("background-color: #202020; color: #ffffff; border-radius: 4px;"));
+                layout->addWidget(label);
+
+                hostVideoLabels.insert(senderIp, label);
+            }
+
+            QImage image;
+            if (!image.loadFromData(datagram, "JPG")) {
+                appendLogMessage(QStringLiteral("解码远端 JPEG 视频帧失败（大小=%1）").arg(datagram.size()));
+                continue;
+            }
+
+            if (!image.isNull()) {
+                label->setPixmap(QPixmap::fromImage(image).scaled(label->size(),
+                                                                  Qt::KeepAspectRatio,
+                                                                  Qt::SmoothTransformation));
+                label->setToolTip(QStringLiteral("来自：%1").arg(senderIp));
+            }
+        }
+    });
 }
 
 void MainWindow::updateControlsForMeetingState()
@@ -678,7 +785,7 @@ void MainWindow::on_btnCreateRoom_clicked()
                 audioTransportActive = true;
             }
 
-            if (videoNet && !videoNet->startTransport(Config::VIDEO_PORT_SEND, ip, Config::VIDEO_PORT_RECV)) {
+            if (videoNet && !videoNet->startSendOnly(ip, Config::VIDEO_PORT_RECV)) {
                 QMessageBox::critical(this,
                                       QStringLiteral("视频错误"),
                                       QStringLiteral("无法建立视频网络通道（端口可能被占用）。"));
@@ -757,6 +864,7 @@ void MainWindow::on_btnCreateRoom_clicked()
         updateMeetingStatusLabel();
         updateControlsForMeetingState();
         appendLogMessage(QStringLiteral("会议服务器已启动，等待客户端连接"));
+        initHostVideoReceiver();
     } else {
         QMessageBox::critical(this,
                               QStringLiteral("创建会议"),
