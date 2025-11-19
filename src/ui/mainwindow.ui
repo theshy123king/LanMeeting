@@ -167,10 +167,33 @@
              <property name="readOnly">
               <bool>true</bool>
              </property>
-            </widget>
-           </item>
-          </layout>
-         </widget>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+        <widget class="QWidget" name="screenTab">
+         <attribute name="title">
+          <string>Screen</string>
+         </attribute>
+         <layout class="QVBoxLayout" name="screenLayout">
+          <property name="spacing">
+           <number>4</number>
+          </property>
+          <property name="margin">
+           <number>4</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="screenShareLabel">
+            <property name="text">
+             <string>No screen sharing</string>
+            </property>
+            <property name="alignment">
+             <set>Qt::AlignCenter</set>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
          <widget class="QWidget" name="settingsTab">
           <attribute name="title">
            <string>Settings</string>

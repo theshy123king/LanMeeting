@@ -79,7 +79,7 @@ void ScreenShareTransport::stopReceiver()
 
     if (m_renderLabel) {
         m_renderLabel->setPixmap(QPixmap());
-        m_renderLabel->setText(QStringLiteral("主持人未开启屏幕共享"));
+        m_renderLabel->setText(QStringLiteral("Host has not started screen sharing"));
     }
 }
 
@@ -87,7 +87,7 @@ void ScreenShareTransport::setRenderLabel(QLabel *label)
 {
     m_renderLabel = label;
     if (m_renderLabel && m_renderLabel->pixmap(Qt::ReturnByValue).isNull()) {
-        m_renderLabel->setText(QStringLiteral("主持人未开启屏幕共享"));
+        m_renderLabel->setText(QStringLiteral("Host has not started screen sharing"));
     }
 }
 
@@ -194,4 +194,3 @@ void ScreenShareTransport::onReadyRead()
         }
     }
 }
-

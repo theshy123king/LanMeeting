@@ -1099,6 +1099,12 @@ void MainWindow::on_btnJoinRoom_clicked()
 
             appendLogMessage(QStringLiteral("控制连接握手成功，已加入会议"));
             startClientMediaTransports();
+
+            // 客户端端：开始接收主持人屏幕共享画面
+            if (screenShare && ui->screenShareLabel) {
+                screenShare->setRenderLabel(ui->screenShareLabel);
+                screenShare->startReceiver(Config::SCREEN_PORT_RECV);
+            }
         });
 
         connect(client, &ControlClient::disconnected, this, [this]() {
