@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QHash>
 #include <QSet>
+#include <QImage>
 
 #include "common/Logger.h"
 #include "net/ControlServer.h"
@@ -32,6 +33,7 @@ class QResizeEvent;
 class QHBoxLayout;
 class QUdpSocket;
 class QLabel;
+class ScreenShareWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -80,6 +82,8 @@ private:
     void refreshParticipantListView();
     void initHostVideoReceiver();
     void initHostAudioMixer();
+    void onScreenShareFrameReceived(const QImage &image);
+    void updateScreenSharePixmap();
 
     Ui::MainWindow *ui;
     QLabel *statusLabel;
@@ -90,6 +94,8 @@ private:
     AudioTransport *audioNet;
     MediaTransport *videoNet;
     ScreenShareTransport *screenShare;
+    QLabel *screenShareOverlayLabel;
+    ScreenShareWidget *screenShareWidget;
 
     QWidget *controlBar;
     QToolButton *btnToggleSidePanel;
@@ -100,6 +106,7 @@ private:
     QToolButton *btnScreenShare;
     QTimer *controlBarHideTimer;
     QWidget *controlsContainer;
+    QTimer *screenShareHideTimer;
 
     bool isDraggingPreview;
     QPoint previewDragStartPos;
@@ -120,6 +127,7 @@ private:
     bool audioMuted;
     int connectedClientCount;
     QStringList participantNames;
+    QImage lastScreenShareFrame;
 };
 
 #endif // MAINWINDOW_H

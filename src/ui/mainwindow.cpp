@@ -21,6 +21,7 @@
 #include <QVector>
 
 #include "common/Config.h"
+#include "ScreenShareWidget.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -33,6 +34,8 @@ MainWindow::MainWindow(QWidget *parent)
     , audioNet(nullptr)
     , videoNet(nullptr)
     , screenShare(nullptr)
+    , screenShareOverlayLabel(nullptr)
+    , screenShareWidget(nullptr)
     , controlBar(nullptr)
     , btnToggleSidePanel(nullptr)
     , btnCreateRoom(nullptr)
@@ -42,6 +45,7 @@ MainWindow::MainWindow(QWidget *parent)
     , btnScreenShare(nullptr)
     , controlBarHideTimer(nullptr)
     , controlsContainer(nullptr)
+    , screenShareHideTimer(nullptr)
     , hostVideoRecvSocket(nullptr)
     , hostAudioRecvSocket(nullptr)
     , isDraggingPreview(false)
@@ -118,11 +122,23 @@ MainWindow::MainWindow(QWidget *parent)
             remoteLayout->setSpacing(0);
             remoteView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
             remoteLayout->addWidget(remoteView);
+
+            // 屏幕共享显示控件：与摄像头视频控件共用容器，但互斥显示。
+            screenShareWidget = new ScreenShareWidget(remoteContainer);
+            screenShareWidget->setObjectName(QStringLiteral("screenShareWidget"));
+            screenShareWidget->setSizePolicy(QSizePolicy::Expanding,
+                                             QSizePolicy::Expanding);
+            screenShareWidget->hide();
+            remoteLayout->addWidget(screenShareWidget);
         }
     }
 
     // 屏幕共享传输（主持人发送 / 客户端接收）
     screenShare = new ScreenShareTransport(this);
+    connect(screenShare,
+            &ScreenShareTransport::screenFrameReceived,
+            this,
+            &MainWindow::onScreenShareFrameReceived);
 
     updateOverlayGeometry();
     updateControlsForMeetingState();
@@ -433,6 +449,98 @@ void MainWindow::showControlBarTemporarily()
     }
 }
 
+void MainWindow::onScreenShareFrameReceived(const QImage &image)
+{
+    if (image.isNull()) {
+        return;
+    }
+
+    // 只有参会者端才显示远端屏幕共享大屏，主持人本地不渲染自己的共享画面，避免递归采集。
+    if (meetingRole != MeetingRole::Guest) {
+        return;
+    }
+
+    lastScreenShareFrame = image;
+
+    // 屏幕共享显示时隐藏摄像头视频控件，保证两者互斥显示、不会叠加绘制。
+    if (videoNet) {
+        if (QWidget *remoteWidget = videoNet->getRemoteVideoWidget()) {
+            remoteWidget->setVisible(false);
+        }
+    }
+
+    if (!screenShareOverlayLabel) {
+        if (!ui->remoteVideoContainer) {
+            return;
+        }
+        auto *layout = qobject_cast<QVBoxLayout *>(ui->remoteVideoContainer->layout());
+        if (!layout) {
+            layout = new QVBoxLayout(ui->remoteVideoContainer);
+            ui->remoteVideoContainer->setLayout(layout);
+            layout->setContentsMargins(0, 0, 0, 0);
+            layout->setSpacing(0);
+        }
+
+        screenShareOverlayLabel = new QLabel(ui->remoteVideoContainer);
+        screenShareOverlayLabel->setObjectName(QStringLiteral("screenShareOverlayLabel"));
+        screenShareOverlayLabel->setAlignment(Qt::AlignCenter);
+        screenShareOverlayLabel->setStyleSheet(
+            QStringLiteral("background-color: black; color: white;"));
+        screenShareOverlayLabel->setSizePolicy(QSizePolicy::Expanding,
+                                               QSizePolicy::Expanding);
+        layout->addWidget(screenShareOverlayLabel);
+    }
+
+    if (!screenShareHideTimer) {
+        screenShareHideTimer = new QTimer(this);
+        screenShareHideTimer->setInterval(500);
+        screenShareHideTimer->setSingleShot(true);
+        connect(screenShareHideTimer, &QTimer::timeout, this, [this]() {
+            // 一段时间未收到新帧，认为屏幕共享结束，恢复摄像头视频。
+            if (screenShareOverlayLabel) {
+                screenShareOverlayLabel->hide();
+                screenShareOverlayLabel->setPixmap(QPixmap());
+                screenShareOverlayLabel->setText(QString());
+            }
+            if (videoNet) {
+                if (QWidget *remoteWidget = videoNet->getRemoteVideoWidget()) {
+                    remoteWidget->setVisible(true);
+                }
+            }
+        });
+    }
+
+    screenShareOverlayLabel->show();
+    screenShareOverlayLabel->raise();
+
+    updateScreenSharePixmap();
+
+    screenShareHideTimer->start();
+}
+
+void MainWindow::updateScreenSharePixmap()
+{
+    if (!screenShareOverlayLabel || !screenShareOverlayLabel->isVisible()) {
+        return;
+    }
+    if (lastScreenShareFrame.isNull()) {
+        return;
+    }
+
+    const QSize size = screenShareOverlayLabel->size();
+    if (size.isEmpty()) {
+        return;
+    }
+
+    // 每次绘制前完全用当前帧覆盖整个控件区域，采用“裁剪式”缩放避免拉伸错位或残影。
+    const QPixmap pixmap =
+        QPixmap::fromImage(lastScreenShareFrame).scaled(size,
+                                                        Qt::KeepAspectRatioByExpanding,
+                                                        Qt::SmoothTransformation);
+    screenShareOverlayLabel->setPixmap(pixmap);
+    screenShareOverlayLabel->setText(QString());
+}
+
 void MainWindow::appendLogMessage(const QString &message)
 {
     const QString timestamp =
@@ -503,6 +611,16 @@ void MainWindow::resetMeetingState()
     if (screenShare && screenShare->isReceiving()) {
         screenShare->stopReceiver();
     }
+
+    if (screenShareHideTimer) {
+        screenShareHideTimer->stop();
+    }
+    if (screenShareOverlayLabel) {
+        screenShareOverlayLabel->hide();
+        screenShareOverlayLabel->setPixmap(QPixmap());
+        screenShareOverlayLabel->setText(QString());
+    }
+    lastScreenShareFrame = QImage();
 }
 
 void MainWindow::startClientMediaTransports()
@@ -898,6 +1016,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
     updateOverlayGeometry();
+    updateScreenSharePixmap();
 }
 
 void MainWindow::on_btnCreateRoom_clicked()

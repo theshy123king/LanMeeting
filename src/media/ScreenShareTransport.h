@@ -5,6 +5,18 @@
 #include <QUdpSocket>
 #include <QTimer>
 #include <QSet>
+#include <QImage>
+#include <QtGlobal>
+#include <QByteArray>
+#include <QHash>
+
+// Internal assembly state for a single screen-share frame on the receiver side.
+struct ScreenShareFrameAssembly
+{
+    quint16 totalPackets = 0;
+    QHash<quint16, QByteArray> packets;
+    qint64 firstSeenMs = 0;
+};
 
 class QLabel;
 
@@ -33,6 +45,11 @@ public:
     bool isReceiving() const { return m_receiving; }
     void setRenderLabel(QLabel *label);
 
+signals:
+    // Emitted on the client side whenever a new screen frame
+    // has been decoded while in receiving mode.
+    void screenFrameReceived(const QImage &image);
+
 private slots:
     void onSendTimer();
     void onReadyRead();
@@ -48,7 +65,13 @@ private:
     bool m_receiving;
 
     QLabel *m_renderLabel;
+
+    // Sender-side incremental frame id.
+    quint32 m_nextFrameId = 0;
+
+    // Receiver-side in-flight frame assemblies.
+    QHash<quint32, ScreenShareFrameAssembly> m_pendingFrames;
+    qint64 m_lastCleanupMs = 0;
 };
 
 #endif // SCREENSHARETRANSPORT_H
-

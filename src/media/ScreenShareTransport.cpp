@@ -7,8 +7,21 @@
 #include <QLabel>
 #include <QPixmap>
 #include <QScreen>
+#include <QDataStream>
+#include <QDateTime>
 
 #include "common/Logger.h"
+
+namespace {
+// Magic value to identify LanMeeting screen-share packets.
+constexpr quint32 kScreenShareMagic = 0x53534852u; // 'S','S','H','R'
+// Header layout: magic (4) + frameId (4) + packetIndex (2) + totalPackets (2) + payloadSize (2)
+constexpr int kScreenShareHeaderSize = 4 + 4 + 2 + 2 + 2;
+// Max payload per UDP packet to stay well below typical MTU.
+constexpr int kScreenShareMaxPayloadSize = 1200;
+// Max time to wait for all fragments of a frame before dropping it (ms).
+constexpr int kFrameAssemblyTimeoutMs = 500;
+} // namespace
 
 ScreenShareTransport::ScreenShareTransport(QObject *parent)
     : QObject(parent)
@@ -19,6 +32,9 @@ ScreenShareTransport::ScreenShareTransport(QObject *parent)
     , m_receiving(false)
     , m_renderLabel(nullptr)
 {
+    m_nextFrameId = 1;
+    m_lastCleanupMs = 0;
+
     m_sendTimer->setInterval(80); // ~12.5 fps, enough for screen sharing
     connect(m_sendTimer, &QTimer::timeout, this, &ScreenShareTransport::onSendTimer);
     connect(m_socket, &QUdpSocket::readyRead, this, &ScreenShareTransport::onReadyRead);
@@ -79,6 +95,9 @@ void ScreenShareTransport::stopReceiver()
         m_receiving = false;
     }
 
+    m_pendingFrames.clear();
+    m_lastCleanupMs = 0;
+
     if (m_renderLabel) {
         m_renderLabel->setPixmap(QPixmap());
         m_renderLabel->setText(QStringLiteral("Host has not started screen sharing"));
@@ -129,17 +148,47 @@ void ScreenShareTransport::onSendTimer()
         return;
     }
 
-    for (const QString &ip : std::as_const(m_destIps)) {
-        if (ip.isEmpty()) {
-            continue;
+    const int maxPayload = kScreenShareMaxPayloadSize;
+    const quint16 totalPackets =
+        static_cast<quint16>((buffer.size() + maxPayload - 1) / maxPayload);
+    if (totalPackets == 0) {
+        return;
+    }
+
+    const quint32 frameId = m_nextFrameId++;
+
+    for (quint16 packetIndex = 0; packetIndex < totalPackets; ++packetIndex) {
+        const int offset = int(packetIndex) * maxPayload;
+        const int len = qMin(maxPayload, buffer.size() - offset);
+        if (len <= 0) {
+            break;
         }
-        const qint64 written =
-            m_socket->writeDatagram(buffer, QHostAddress(ip), m_remotePort);
-        if (written < 0) {
-            LOG_WARN(QStringLiteral("ScreenShareTransport: failed to send screen frame to %1:%2 - %3")
-                         .arg(ip)
-                         .arg(m_remotePort)
-                         .arg(m_socket->errorString()));
+
+        QByteArray datagram;
+        datagram.reserve(kScreenShareHeaderSize + len);
+
+        QDataStream out(&datagram, QIODevice::WriteOnly);
+        out.setByteOrder(QDataStream::BigEndian);
+        out << kScreenShareMagic;
+        out << frameId;
+        out << packetIndex;
+        out << totalPackets;
+        out << static_cast<quint16>(len);
+
+        datagram.append(buffer.constData() + offset, len);
+
+        for (const QString &ip : std::as_const(m_destIps)) {
+            if (ip.isEmpty()) {
+                continue;
+            }
+            const qint64 written =
+                m_socket->writeDatagram(datagram, QHostAddress(ip), m_remotePort);
+            if (written < 0) {
+                LOG_WARN(QStringLiteral("ScreenShareTransport: failed to send screen frame fragment to %1:%2 - %3")
+                             .arg(ip)
+                             .arg(m_remotePort)
+                             .arg(m_socket->errorString()));
+            }
         }
     }
 }
@@ -155,6 +204,8 @@ void ScreenShareTransport::onReadyRead()
         }
         return;
     }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
 
     while (m_socket->hasPendingDatagrams()) {
         QByteArray datagram;
@@ -173,26 +224,123 @@ void ScreenShareTransport::onReadyRead()
             datagram.resize(int(read));
         }
 
-        if (datagram.isEmpty()) {
-            continue;
-        }
-
-        if (!m_renderLabel) {
-            continue;
-        }
-
-        QImage image;
-        if (!image.loadFromData(datagram, "JPG")) {
-            LOG_WARN(QStringLiteral("ScreenShareTransport: failed to decode JPEG screen frame (size=%1)")
+        if (datagram.size() < kScreenShareHeaderSize) {
+            LOG_WARN(QStringLiteral("ScreenShareTransport: received too small datagram (%1 bytes)")
                          .arg(datagram.size()));
             continue;
         }
 
-        if (!image.isNull()) {
-            m_renderLabel->setPixmap(QPixmap::fromImage(image).scaled(m_renderLabel->size(),
-                                                                      Qt::KeepAspectRatio,
-                                                                      Qt::SmoothTransformation));
-            m_renderLabel->setText(QString());
+        QDataStream in(datagram);
+        in.setByteOrder(QDataStream::BigEndian);
+
+        quint32 magic = 0;
+        quint32 frameId = 0;
+        quint16 packetIndex = 0;
+        quint16 totalPackets = 0;
+        quint16 payloadSize = 0;
+
+        in >> magic >> frameId >> packetIndex >> totalPackets >> payloadSize;
+        if (in.status() != QDataStream::Ok) {
+            LOG_WARN(QStringLiteral("ScreenShareTransport: failed to parse screen-share header"));
+            continue;
+        }
+
+        if (magic != kScreenShareMagic) {
+            // Not a screen-share packet; ignore silently.
+            continue;
+        }
+
+        if (totalPackets == 0) {
+            continue;
+        }
+
+        if (packetIndex >= totalPackets) {
+            continue;
+        }
+
+        const int headerSize = kScreenShareHeaderSize;
+        if (payloadSize == 0 || headerSize + payloadSize > datagram.size()) {
+            LOG_WARN(QStringLiteral("ScreenShareTransport: invalid payload size %1 for datagram size %2")
+                         .arg(payloadSize)
+                         .arg(datagram.size()));
+            continue;
+        }
+
+        const QByteArray payload = datagram.mid(headerSize, payloadSize);
+
+        ScreenShareFrameAssembly &assembly = m_pendingFrames[frameId];
+        if (assembly.packets.isEmpty()) {
+            assembly.totalPackets = totalPackets;
+            assembly.firstSeenMs = nowMs;
+        } else if (assembly.totalPackets != totalPackets) {
+            // Inconsistent metadata; reset this frame.
+            assembly.packets.clear();
+            assembly.totalPackets = totalPackets;
+            assembly.firstSeenMs = nowMs;
+        }
+
+        if (!assembly.packets.contains(packetIndex)) {
+            assembly.packets.insert(packetIndex, payload);
+        }
+
+        if (assembly.packets.size() == assembly.totalPackets) {
+            // We have all fragments for this frame; assemble in order.
+            QByteArray frameData;
+            frameData.reserve(int(assembly.totalPackets) * kScreenShareMaxPayloadSize);
+
+            bool missing = false;
+            for (quint16 i = 0; i < assembly.totalPackets; ++i) {
+                auto it = assembly.packets.constFind(i);
+                if (it == assembly.packets.cend()) {
+                    missing = true;
+                    break;
+                }
+                frameData.append(it.value());
+            }
+
+            m_pendingFrames.remove(frameId);
+
+            if (missing || frameData.isEmpty()) {
+                continue;
+            }
+
+            QImage image;
+            if (!image.loadFromData(frameData, "JPG")) {
+                LOG_WARN(QStringLiteral("ScreenShareTransport: failed to decode reassembled JPEG screen frame (size=%1)")
+                             .arg(frameData.size()));
+                continue;
+            }
+
+            if (!image.isNull()) {
+                emit screenFrameReceived(image);
+
+                if (m_renderLabel) {
+                    const QSize labelSize = m_renderLabel->size();
+                    if (!labelSize.isEmpty()) {
+                        const QPixmap pixmap =
+                            QPixmap::fromImage(image).scaled(labelSize,
+                                                             Qt::KeepAspectRatioByExpanding,
+                                                             Qt::SmoothTransformation);
+                        m_renderLabel->setPixmap(pixmap);
+                        m_renderLabel->setText(QString());
+                    }
+                }
+            }
+        }
+    }
+
+    // Drop timed-out incomplete frames.
+    const qint64 nowAfterMs = QDateTime::currentMSecsSinceEpoch();
+    if (m_lastCleanupMs == 0 || nowAfterMs - m_lastCleanupMs > kFrameAssemblyTimeoutMs) {
+        m_lastCleanupMs = nowAfterMs;
+
+        auto it = m_pendingFrames.begin();
+        while (it != m_pendingFrames.end()) {
+            if (nowAfterMs - it->firstSeenMs > kFrameAssemblyTimeoutMs) {
+                it = m_pendingFrames.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
 }
