@@ -5,9 +5,47 @@
 #include "AudioEngine.h"
 #include "common/Logger.h"
 
+// Worker object that lives in a dedicated high-priority thread and
+// performs the actual UDP send for audio frames so that the main/UI
+// thread (where AudioEngine typically lives) is not blocked by
+// network I/O or kernel socket back-pressure.
+class AudioSendWorker : public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit AudioSendWorker(QObject *parent = nullptr)
+        : QObject(parent)
+        , socket(nullptr)
+    {
+    }
+
+public slots:
+    void sendAudioFrame(const QByteArray &data, const QString &ip, quint16 port)
+    {
+        if (data.isEmpty() || ip.isEmpty() || port == 0) {
+            return;
+        }
+
+        if (!socket) {
+            socket = new QUdpSocket(this);
+        }
+
+        const qint64 written = socket->writeDatagram(data, QHostAddress(ip), port);
+        if (written < 0) {
+            LOG_WARN(QStringLiteral("AudioSendWorker: failed to send UDP datagram to %1:%2 - %3")
+                         .arg(ip)
+                         .arg(port)
+                         .arg(socket->errorString()));
+        }
+    }
+
+private:
+    QUdpSocket *socket;
+};
+
 AudioTransport::AudioTransport(AudioEngine *engine, QObject *parent)
     : QObject(parent)
-    , udpSendSocket(new QUdpSocket(this))
     , udpRecvSocket(new QUdpSocket(this))
     , localPort(0)
     , remoteIp()
@@ -15,13 +53,38 @@ AudioTransport::AudioTransport(AudioEngine *engine, QObject *parent)
     , audio(engine)
     , sendTimer(new QTimer(this))
     , muted(false)
+    , sendThread()
+    , sendWorker(new AudioSendWorker)
 {
     sendTimer->setInterval(20);
     connect(sendTimer, &QTimer::timeout, this, &AudioTransport::onSendTimer);
+
+    // Configure dedicated audio send thread.
+    sendWorker->moveToThread(&sendThread);
+    sendThread.setObjectName(QStringLiteral("AudioSendThread"));
+    connect(&sendThread, &QThread::finished, sendWorker, &QObject::deleteLater);
+
+    // Audio frames captured on the main/GUI thread are forwarded to
+    // the worker via a queued connection so that network I/O happens
+    // independently of screen sharing or video encoding work.
+    connect(this,
+            &AudioTransport::audioFrameCaptured,
+            sendWorker,
+            &AudioSendWorker::sendAudioFrame,
+            Qt::QueuedConnection);
+
+    // Give the audio sending thread a higher scheduling priority so
+    // that 20 ms audio frames are transmitted on time even under load.
+    sendThread.start(QThread::TimeCriticalPriority);
 }
 
 AudioTransport::~AudioTransport()
 {
+    if (sendThread.isRunning()) {
+        sendThread.quit();
+        sendThread.wait();
+    }
+
     stopTransport();
 }
 
@@ -70,7 +133,6 @@ void AudioTransport::stopTransport()
         sendTimer->stop();
     }
 
-    udpSendSocket->disconnect(this);
     if (udpRecvSocket->isOpen()) {
         udpRecvSocket->close();
     }
@@ -138,12 +200,8 @@ void AudioTransport::onSendTimer()
         return;
     }
 
-    const qint64 written =
-        udpSendSocket->writeDatagram(data, QHostAddress(remoteIp), remotePort);
-    if (written < 0) {
-        LOG_WARN(QStringLiteral("AudioTransport: failed to send UDP datagram to %1:%2 - %3")
-                     .arg(remoteIp)
-                     .arg(remotePort)
-                     .arg(udpSendSocket->errorString()));
-    }
+    // Offload the actual UDP send to the dedicated audio send thread.
+    emit audioFrameCaptured(data, remoteIp, remotePort);
 }
+
+#include "AudioTransport.moc"

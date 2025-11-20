@@ -5,8 +5,10 @@
 #include <QUdpSocket>
 #include <QTimer>
 #include <QString>
+#include <QThread>
 
 class AudioEngine;
+class AudioSendWorker;
 
 class AudioTransport : public QObject
 {
@@ -27,8 +29,16 @@ private slots:
     void onReadyRead();
     void onSendTimer();
 
+signals:
+    // Emitted on the main/GUI thread whenever a new chunk
+    // of captured audio should be sent over UDP. The actual
+    // network I/O is performed on a dedicated worker thread
+    // to avoid being blocked by heavy screen sharing or video.
+    void audioFrameCaptured(const QByteArray &data,
+                            const QString &remoteIp,
+                            quint16 remotePort);
+
 private:
-    QUdpSocket *udpSendSocket;
     QUdpSocket *udpRecvSocket;
     quint16 localPort;
     QString remoteIp;
@@ -36,6 +46,11 @@ private:
     AudioEngine *audio;
     QTimer *sendTimer;
     bool muted;
+
+    // Dedicated worker thread and helper object that own
+    // the UDP send socket for audio frames.
+    QThread sendThread;
+    AudioSendWorker *sendWorker;
 };
 
 #endif // AUDIOTRANSPORT_H

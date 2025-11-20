@@ -95,6 +95,46 @@ void ControlClient::onReadyRead()
             const QString msg = QString::fromUtf8(line.mid(5));
             LOG_INFO(QStringLiteral("ControlClient: chat received - %1").arg(msg));
             emit chatReceived(msg);
+        } else if (line.startsWith(QByteArrayLiteral("STATE:"))) {
+            // Examples:
+            // STATE:MEDIA;ip=1.2.3.4;mic=1;cam=0
+            // STATE:SCREEN;ip=1.2.3.4;on=1
+            const QByteArray payload = line.mid(6);
+            const QList<QByteArray> fields = payload.split(';');
+            if (fields.isEmpty())
+                continue;
+
+            const QByteArray kind = fields.at(0);
+            QString ip;
+            bool micMuted = false;
+            bool cameraEnabled = true;
+            bool sharing = false;
+
+            for (int i = 1; i < fields.size(); ++i) {
+                const QByteArray part = fields.at(i);
+                if (part.startsWith(QByteArrayLiteral("ip="))) {
+                    ip = QString::fromUtf8(part.mid(3));
+                } else if (part.startsWith(QByteArrayLiteral("mic="))) {
+                    const QByteArray v = part.mid(4).trimmed();
+                    micMuted = (v == "1");
+                } else if (part.startsWith(QByteArrayLiteral("cam="))) {
+                    const QByteArray v = part.mid(4).trimmed();
+                    cameraEnabled = (v != "0");
+                } else if (part.startsWith(QByteArrayLiteral("on="))) {
+                    const QByteArray v = part.mid(3).trimmed();
+                    sharing = (v == "1");
+                }
+            }
+
+            if (kind == QByteArrayLiteral("MEDIA")) {
+                if (!ip.isEmpty()) {
+                    emit mediaStateUpdated(ip, micMuted, cameraEnabled);
+                }
+            } else if (kind == QByteArrayLiteral("SCREEN")) {
+                if (!ip.isEmpty()) {
+                    emit screenShareStateUpdated(ip, sharing);
+                }
+            }
         }
     }
 }
@@ -130,5 +170,37 @@ void ControlClient::sendChatMessage(const QString &message)
     const qint64 written = m_socket->write(data);
     if (written < 0) {
         LOG_WARN(QStringLiteral("ControlClient: failed to send chat message - %1").arg(m_socket->errorString()));
+    }
+}
+
+void ControlClient::sendMediaState(bool micMuted, bool cameraEnabled)
+{
+    if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    const QByteArray line = QByteArrayLiteral("MEDIA:mic=")
+                            + (micMuted ? "1" : "0")
+                            + QByteArrayLiteral(";cam=")
+                            + (cameraEnabled ? "1" : "0")
+                            + '\n';
+    const qint64 written = m_socket->write(line);
+    if (written < 0) {
+        LOG_WARN(QStringLiteral("ControlClient: failed to send MEDIA state - %1").arg(m_socket->errorString()));
+    }
+}
+
+void ControlClient::sendScreenShareState(bool sharing)
+{
+    if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    const QByteArray line = QByteArrayLiteral("SCREEN:on=")
+                            + (sharing ? "1" : "0")
+                            + '\n';
+    const qint64 written = m_socket->write(line);
+    if (written < 0) {
+        LOG_WARN(QStringLiteral("ControlClient: failed to send SCREEN state - %1").arg(m_socket->errorString()));
     }
 }

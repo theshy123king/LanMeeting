@@ -15,6 +15,7 @@ extern "C" {
 
 #include "MediaEngine.h"
 #include "common/Logger.h"
+#include "common/Config.h"
 
 MediaTransport::MediaTransport(MediaEngine *engine, QObject *parent)
     : QObject(parent)
@@ -34,7 +35,9 @@ MediaTransport::MediaTransport(MediaEngine *engine, QObject *parent)
     , videoHeight(0)
 #endif
 {
-    sendTimer->setInterval(40);
+    // Limit camera video frame rate a bit to reduce CPU
+    // and bandwidth usage, prioritising audio smoothness.
+    sendTimer->setInterval(Config::VIDEO_SEND_INTERVAL_MS);
     connect(sendTimer, &QTimer::timeout, this, &MediaTransport::onSendTimer);
 
     remoteVideoLabel->setAlignment(Qt::AlignCenter);

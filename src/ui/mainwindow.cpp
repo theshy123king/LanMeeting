@@ -4,6 +4,7 @@
 #include <QInputDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QToolButton>
 #include <QTimer>
 #include <QMouseEvent>
@@ -18,6 +19,7 @@
 #include <QTextBrowser>
 #include <QUdpSocket>
 #include <QHostAddress>
+#include <QStyle>
 #include <QVector>
 
 #include "common/Config.h"
@@ -36,16 +38,26 @@ MainWindow::MainWindow(QWidget *parent)
     , screenShare(nullptr)
     , screenShareOverlayLabel(nullptr)
     , screenShareWidget(nullptr)
+    , remoteParticipantsContainer(nullptr)
+    , remoteParticipantsLayout(nullptr)
+    , localNameLabel(nullptr)
+    , localMicIconLabel(nullptr)
+    , localCameraIconLabel(nullptr)
+    , remoteHostNameLabel(nullptr)
+    , remoteHostMicIconLabel(nullptr)
+    , remoteHostCameraIconLabel(nullptr)
     , controlBar(nullptr)
     , btnToggleSidePanel(nullptr)
     , btnCreateRoom(nullptr)
     , btnJoinRoom(nullptr)
     , btnLeaveRoom(nullptr)
     , btnMute(nullptr)
+    , btnCamera(nullptr)
     , btnScreenShare(nullptr)
     , controlBarHideTimer(nullptr)
     , controlsContainer(nullptr)
     , screenShareHideTimer(nullptr)
+    , screenFitCheckBox(nullptr)
     , hostVideoRecvSocket(nullptr)
     , hostAudioRecvSocket(nullptr)
     , isDraggingPreview(false)
@@ -57,6 +69,7 @@ MainWindow::MainWindow(QWidget *parent)
     , audioTransportActive(false)
     , videoTransportActive(false)
     , audioMuted(false)
+    , cameraEnabled(true)
     , connectedClientCount(0)
 {
     ui->setupUi(this);
@@ -85,13 +98,35 @@ MainWindow::MainWindow(QWidget *parent)
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(0);
         layout->addWidget(preview);
+
+        // Local self-view overlay: show display name and
+        // basic mic/camera state icons under the preview.
+        QWidget *infoBar = new QWidget(ui->videoContainer);
+        auto *infoLayout = new QHBoxLayout(infoBar);
+        infoLayout->setContentsMargins(6, 2, 6, 2);
+        infoLayout->setSpacing(4);
+
+        localNameLabel = new QLabel(QStringLiteral("Me"), infoBar);
+        localNameLabel->setStyleSheet(QStringLiteral("color: white;"));
+        infoLayout->addWidget(localNameLabel);
+
+        infoLayout->addStretch();
+
+        localMicIconLabel = new QLabel(infoBar);
+        localCameraIconLabel = new QLabel(infoBar);
+        infoLayout->addWidget(localMicIconLabel);
+        infoLayout->addWidget(localCameraIconLabel);
+
+        layout->addWidget(infoBar);
     }
 
-    if (!media->startCamera()) {
+    cameraEnabled = media->startCamera();
+    if (!cameraEnabled) {
         QMessageBox::warning(this,
                              QStringLiteral("Video error"),
                              QStringLiteral("Unable to start camera. Please check device permissions or whether it is in use."));
     }
+    updateLocalMediaStateIcons();
 
     // 本地音频采集和播放
     audio = new AudioEngine(this);
@@ -130,11 +165,27 @@ MainWindow::MainWindow(QWidget *parent)
                                              QSizePolicy::Expanding);
             screenShareWidget->hide();
             remoteLayout->addWidget(screenShareWidget);
+
+            // Host-side multi-participant grid container lives under the
+            // main remote video area and is shown when there are multiple
+            // remote video streams to arrange.
+            remoteParticipantsContainer = new QWidget(remoteContainer);
+            remoteParticipantsContainer->setObjectName(QStringLiteral("remoteParticipantsContainer"));
+            remoteParticipantsContainer->setSizePolicy(QSizePolicy::Expanding,
+                                                       QSizePolicy::Expanding);
+            remoteParticipantsLayout = new QGridLayout(remoteParticipantsContainer);
+            remoteParticipantsLayout->setContentsMargins(4, 4, 4, 4);
+            remoteParticipantsLayout->setSpacing(4);
+            remoteParticipantsContainer->hide();
+            remoteLayout->addWidget(remoteParticipantsContainer);
         }
     }
 
     // 屏幕共享传输（主持人发送 / 客户端接收）
     screenShare = new ScreenShareTransport(this);
+    if (screenFitCheckBox) {
+        screenShare->setRenderFitToWindow(screenFitCheckBox->isChecked());
+    }
     connect(screenShare,
             &ScreenShareTransport::screenFrameReceived,
             this,
@@ -184,8 +235,8 @@ void MainWindow::initLayout()
     }
 }
 
-void MainWindow::initSidePanel()
-{
+  void MainWindow::initSidePanel()
+  {
     if (ui->sidePanel) {
         ui->sidePanel->setVisible(false);
     }
@@ -218,9 +269,9 @@ void MainWindow::initSidePanel()
     if (ui->btnSendChat) {
         ui->btnSendChat->setText(QStringLiteral("Send"));
     }
-    if (ui->labelParticipants) {
-        ui->labelParticipants->setText(QStringLiteral("Participants"));
-    }
+      if (ui->labelParticipants) {
+          ui->labelParticipants->setText(QStringLiteral("Participants"));
+      }
 
     if (ui->chkHideSelfView) {
         ui->chkHideSelfView->setText(QStringLiteral("Hide self view"));
@@ -233,10 +284,27 @@ void MainWindow::initSidePanel()
         });
     }
 
-    if (ui->chkMuteOnJoin) {
-        ui->chkMuteOnJoin->setText(QStringLiteral("Mute on join"));
-    }
-}
+      if (ui->chkMuteOnJoin) {
+          ui->chkMuteOnJoin->setText(QStringLiteral("Mute on join"));
+      }
+
+      // Screen tab: add a simple scaling mode toggle for screen sharing.
+      if (ui->screenShareLabel) {
+          QWidget *parent = ui->screenShareLabel->parentWidget();
+          if (parent && !screenFitCheckBox) {
+              if (auto *layout = qobject_cast<QVBoxLayout *>(parent->layout())) {
+                  screenFitCheckBox = new QCheckBox(QStringLiteral("Fit to window"), parent);
+                  screenFitCheckBox->setChecked(true);
+                  layout->addWidget(screenFitCheckBox);
+                  connect(screenFitCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+                      if (screenShare) {
+                          screenShare->setRenderFitToWindow(checked);
+                      }
+                  });
+              }
+          }
+      }
+  }
 
 void MainWindow::initPreviewWindow()
 {
@@ -246,8 +314,27 @@ void MainWindow::initPreviewWindow()
 
     ui->videoContainer->setMinimumSize(200, 150);
     ui->videoContainer->setMaximumSize(400, 300);
-    ui->videoContainer->setStyleSheet(QStringLiteral("background-color: black; border-radius: 4px;"));
-    ui->videoContainer->installEventFilter(this);
+      ui->videoContainer->setStyleSheet(QStringLiteral("background-color: black; border-radius: 4px;"));
+      ui->videoContainer->installEventFilter(this);
+  }
+
+void MainWindow::updateLocalMediaStateIcons()
+{
+    QStyle *s = style();
+    if (localMicIconLabel && s) {
+        const QStyle::StandardPixmap micPixmap =
+            audioMuted ? QStyle::SP_MediaVolumeMuted : QStyle::SP_MediaVolume;
+        localMicIconLabel->setPixmap(s->standardIcon(micPixmap).pixmap(16, 16));
+        localMicIconLabel->setToolTip(audioMuted ? QStringLiteral("Microphone muted")
+                                                 : QStringLiteral("Microphone on"));
+    }
+    if (localCameraIconLabel && s) {
+        const QStyle::StandardPixmap camPixmap =
+            cameraEnabled ? QStyle::SP_DesktopIcon : QStyle::SP_DialogCloseButton;
+        localCameraIconLabel->setPixmap(s->standardIcon(camPixmap).pixmap(16, 16));
+        localCameraIconLabel->setToolTip(cameraEnabled ? QStringLiteral("Camera on")
+                                                       : QStringLiteral("Camera off"));
+    }
 }
 
 void MainWindow::initFloatingControls()
@@ -288,25 +375,49 @@ void MainWindow::initFloatingControls()
     controlsLayout->addWidget(btnJoinRoom);
     connect(btnJoinRoom, &QAbstractButton::clicked, this, &MainWindow::on_btnJoinRoom_clicked);
 
-    btnLeaveRoom = new QToolButton(controlsContainer);
-    btnLeaveRoom->setText(QStringLiteral("Leave"));
-    controlsLayout->addWidget(btnLeaveRoom);
-    connect(btnLeaveRoom, &QAbstractButton::clicked, this, &MainWindow::on_btnLeaveRoom_clicked);
+      btnLeaveRoom = new QToolButton(controlsContainer);
+      btnLeaveRoom->setText(QStringLiteral("Leave"));
+      controlsLayout->addWidget(btnLeaveRoom);
+      connect(btnLeaveRoom, &QAbstractButton::clicked, this, &MainWindow::on_btnLeaveRoom_clicked);
 
-    btnMute = new QToolButton(controlsContainer);
-    btnMute->setText(QStringLiteral("Mute"));
-    btnMute->setCheckable(true);
-    controlsLayout->addWidget(btnMute);
-    connect(btnMute, &QAbstractButton::toggled, this, [this](bool checked) {
-        audioMuted = checked;
-        if (audioNet) {
-            audioNet->setMuted(audioMuted);
-        }
-        appendLogMessage(checked ? QStringLiteral("Mute enabled (local audio will not be sent)")
-                                 : QStringLiteral("Mute disabled, local audio will be sent"));
-    });
+      btnMute = new QToolButton(controlsContainer);
+      btnMute->setText(QStringLiteral("Mute"));
+      btnMute->setCheckable(true);
+      controlsLayout->addWidget(btnMute);
+      connect(btnMute, &QAbstractButton::toggled, this, [this](bool checked) {
+          audioMuted = checked;
+          if (audioNet) {
+              audioNet->setMuted(audioMuted);
+          }
+          appendLogMessage(checked ? QStringLiteral("Mute enabled (local audio will not be sent)")
+                                   : QStringLiteral("Mute disabled, local audio will be sent"));
+          updateLocalMediaStateIcons();
+      });
 
-    btnScreenShare = new QToolButton(controlsContainer);
+      btnCamera = new QToolButton(controlsContainer);
+      btnCamera->setText(QStringLiteral("Camera"));
+      btnCamera->setCheckable(true);
+      controlsLayout->addWidget(btnCamera);
+      connect(btnCamera, &QAbstractButton::toggled, this, [this](bool checked) {
+          if (!media) {
+              return;
+          }
+          if (checked) {
+              media->stopCamera();
+              cameraEnabled = false;
+              appendLogMessage(QStringLiteral("Camera disabled; local video will not be sent"));
+          } else {
+              cameraEnabled = media->startCamera();
+              if (!cameraEnabled) {
+                  QMessageBox::warning(this,
+                                       QStringLiteral("Video error"),
+                                       QStringLiteral("Unable to start camera. Please check device permissions or whether it is in use."));
+              }
+          }
+          updateLocalMediaStateIcons();
+      });
+
+      btnScreenShare = new QToolButton(controlsContainer);
     btnScreenShare->setText(QStringLiteral("Share Screen"));
     btnScreenShare->setCheckable(true);
     controlsLayout->addWidget(btnScreenShare);
@@ -368,13 +479,13 @@ void MainWindow::initFloatingControls()
     controlBar->installEventFilter(this);
 
     controlBarHideTimer = new QTimer(this);
-    controlBarHideTimer->setInterval(2000);
-    controlBarHideTimer->setSingleShot(true);
-    connect(controlBarHideTimer, &QTimer::timeout, this, [this]() {
-        if (controlBar) {
-            controlBar->hide();
-        }
-    });
+      controlBarHideTimer->setInterval(2000);
+      controlBarHideTimer->setSingleShot(true);
+      connect(controlBarHideTimer, &QTimer::timeout, this, [this]() {
+          if (controlBar) {
+              controlBar->hide();
+          }
+      });
 }
 
 void MainWindow::updateOverlayGeometry()
@@ -552,8 +663,8 @@ void MainWindow::appendLogMessage(const QString &message)
     }
 }
 
-void MainWindow::resetMeetingState()
-{
+  void MainWindow::resetMeetingState()
+  {
     if (audioNet && audioTransportActive) {
         appendLogMessage(QStringLiteral("停止音频传输"));
         audioNet->stopTransport();
@@ -566,10 +677,11 @@ void MainWindow::resetMeetingState()
     }
     videoTransportActive = false;
 
-    audioMuted = false;
-    if (audioNet) {
-        audioNet->setMuted(false);
-    }
+      audioMuted = false;
+      if (audioNet) {
+          audioNet->setMuted(false);
+      }
+      updateLocalMediaStateIcons();
 
     meetingRole = MeetingRole::None;
     meetingState = MeetingState::Idle;
@@ -593,16 +705,22 @@ void MainWindow::resetMeetingState()
         hostAudioRecvSocket = nullptr;
     }
 
-    if (ui->remoteVideoContainer) {
-        if (auto *layout = ui->remoteVideoContainer->layout()) {
-            while (QLayoutItem *item = layout->takeAt(0)) {
-                if (QWidget *w = item->widget()) {
-                    w->deleteLater();
-                }
-                delete item;
-            }
-        }
-    }
+      if (ui->remoteVideoContainer) {
+          if (auto *layout = ui->remoteVideoContainer->layout()) {
+              while (QLayoutItem *item = layout->takeAt(0)) {
+                  if (QWidget *w = item->widget()) {
+                      w->deleteLater();
+                  }
+                  delete item;
+              }
+          }
+      }
+      remoteParticipantsContainer = nullptr;
+      remoteParticipantsLayout = nullptr;
+      hostVideoLabels.clear();
+      hostVideoMicIconLabels.clear();
+      hostVideoCameraIconLabels.clear();
+      activeSpeakerIp.clear();
 
     if (screenShare && screenShare->isSending()) {
         screenShare->stopSender();
@@ -612,14 +730,15 @@ void MainWindow::resetMeetingState()
         screenShare->stopReceiver();
     }
 
-    if (screenShareHideTimer) {
-        screenShareHideTimer->stop();
-    }
-    if (screenShareOverlayLabel) {
-        screenShareOverlayLabel->hide();
-        screenShareOverlayLabel->setPixmap(QPixmap());
-        screenShareOverlayLabel->setText(QString());
-    }
+      if (screenShareHideTimer) {
+          screenShareHideTimer->stop();
+      }
+      if (screenShareOverlayLabel) {
+          screenShareOverlayLabel->hide();
+          screenShareOverlayLabel->setPixmap(QPixmap());
+          screenShareOverlayLabel->setText(QString());
+      }
+      screenShareOverlayLabel = nullptr;
     lastScreenShareFrame = QImage();
 }
 
@@ -667,6 +786,129 @@ void MainWindow::startClientMediaTransports()
 static constexpr int kHostVideoThumbWidth  = 160;
 static constexpr int kHostVideoThumbHeight = 120;
 
+QWidget *MainWindow::createParticipantVideoTile(const QString &displayName,
+                                                QLabel **outVideoLabel,
+                                                QLabel **outMicIconLabel,
+                                                QLabel **outCameraIconLabel)
+{
+    if (!remoteParticipantsContainer) {
+        return nullptr;
+    }
+
+    QWidget *tile = new QWidget(remoteParticipantsContainer);
+    tile->setObjectName(QStringLiteral("remoteParticipantTile"));
+    tile->setStyleSheet(QStringLiteral("background-color: #202020; border-radius: 4px;"));
+
+    auto *tileLayout = new QVBoxLayout(tile);
+    tileLayout->setContentsMargins(0, 0, 0, 0);
+    tileLayout->setSpacing(0);
+
+    QLabel *videoLabel = new QLabel(tile);
+    videoLabel->setMinimumSize(kHostVideoThumbWidth, kHostVideoThumbHeight);
+    videoLabel->setAlignment(Qt::AlignCenter);
+    videoLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    tileLayout->addWidget(videoLabel);
+
+    QWidget *infoBar = new QWidget(tile);
+    auto *infoLayout = new QHBoxLayout(infoBar);
+    infoLayout->setContentsMargins(6, 2, 6, 2);
+    infoLayout->setSpacing(4);
+
+    QLabel *nameLabel = new QLabel(displayName, infoBar);
+    nameLabel->setStyleSheet(QStringLiteral("color: white;"));
+    infoLayout->addWidget(nameLabel);
+
+    infoLayout->addStretch();
+
+    QLabel *micIconLabel = new QLabel(infoBar);
+    QLabel *cameraIconLabel = new QLabel(infoBar);
+    QStyle *s = style();
+    micIconLabel->setPixmap(s->standardIcon(QStyle::SP_MediaVolume).pixmap(16, 16));
+    micIconLabel->setToolTip(QStringLiteral("Microphone status (remote)"));
+    cameraIconLabel->setPixmap(s->standardIcon(QStyle::SP_DesktopIcon).pixmap(16, 16));
+    cameraIconLabel->setToolTip(QStringLiteral("Camera status (remote)"));
+    infoLayout->addWidget(micIconLabel);
+    infoLayout->addWidget(cameraIconLabel);
+
+    tileLayout->addWidget(infoBar);
+
+    if (outVideoLabel) {
+        *outVideoLabel = videoLabel;
+    }
+    if (outMicIconLabel) {
+        *outMicIconLabel = micIconLabel;
+    }
+    if (outCameraIconLabel) {
+        *outCameraIconLabel = cameraIconLabel;
+    }
+
+    return tile;
+}
+
+void MainWindow::rebuildRemoteParticipantGrid()
+{
+    if (!remoteParticipantsContainer || !remoteParticipantsLayout) {
+        return;
+    }
+
+    // Clear layout items but keep tiles alive.
+    while (QLayoutItem *item = remoteParticipantsLayout->takeAt(0)) {
+        delete item;
+    }
+
+    const QList<QString> keys = hostVideoLabels.keys();
+    const int count = keys.size();
+    if (count == 0) {
+        remoteParticipantsContainer->hide();
+        return;
+    }
+
+    remoteParticipantsContainer->show();
+
+    int columns = 1;
+    if (count == 1) {
+        columns = 1;
+    } else if (count == 2) {
+        columns = 2;
+    } else if (count <= 4) {
+        columns = 2;
+    } else {
+        columns = 3;
+    }
+    int row = 0;
+    int column = 0;
+
+    for (int i = 0; i < keys.size(); ++i) {
+        const QString &ip = keys.at(i);
+        QLabel *label = hostVideoLabels.value(ip, nullptr);
+        if (!label) {
+            continue;
+        }
+        QWidget *tile = label->parentWidget();
+        if (!tile) {
+            continue;
+        }
+
+        // 根据当前发言者设置高亮边框
+        if (!activeSpeakerIp.isEmpty() && ip == activeSpeakerIp) {
+            tile->setStyleSheet(QStringLiteral(
+                "background-color: #202020; border-radius: 4px; border: 2px solid #3daee9;"));
+        } else {
+            tile->setStyleSheet(QStringLiteral(
+                "background-color: #202020; border-radius: 4px;"));
+        }
+
+        remoteParticipantsLayout->addWidget(tile, row, column);
+        remoteParticipantsLayout->setAlignment(tile, Qt::AlignCenter);
+
+        ++column;
+        if (column >= columns) {
+            column = 0;
+            ++row;
+        }
+    }
+}
+
 void MainWindow::initHostVideoReceiver()
 {
     if (hostVideoRecvSocket) {
@@ -711,24 +953,53 @@ void MainWindow::initHostVideoReceiver()
             }
 
             QLabel *label = hostVideoLabels.value(senderIp, nullptr);
-            if (!label) {
-                auto *layout = qobject_cast<QVBoxLayout *>(ui->remoteVideoContainer->layout());
-                if (!layout) {
-                    layout = new QVBoxLayout(ui->remoteVideoContainer);
-                    ui->remoteVideoContainer->setLayout(layout);
-                    layout->setContentsMargins(0, 0, 0, 0);
-                    layout->setSpacing(4);
-                }
+              if (!label) {
+                  if (!remoteParticipantsContainer || !remoteParticipantsLayout) {
+                      if (QWidget *remoteContainer = ui->remoteVideoContainer) {
+                          auto *outerLayout = qobject_cast<QVBoxLayout *>(remoteContainer->layout());
+                          if (!outerLayout) {
+                              outerLayout = new QVBoxLayout(remoteContainer);
+                              remoteContainer->setLayout(outerLayout);
+                              outerLayout->setContentsMargins(0, 0, 0, 0);
+                              outerLayout->setSpacing(0);
+                          }
 
-                label = new QLabel(ui->remoteVideoContainer);
-                label->setMinimumSize(kHostVideoThumbWidth, kHostVideoThumbHeight);
-                label->setAlignment(Qt::AlignCenter);
-                label->setStyleSheet(
-                    QStringLiteral("background-color: #202020; color: #ffffff; border-radius: 4px;"));
-                layout->addWidget(label);
+                          remoteParticipantsContainer = new QWidget(remoteContainer);
+                          remoteParticipantsContainer->setObjectName(
+                              QStringLiteral("remoteParticipantsContainer"));
+                          remoteParticipantsContainer->setSizePolicy(QSizePolicy::Expanding,
+                                                                     QSizePolicy::Expanding);
+                          remoteParticipantsLayout = new QGridLayout(remoteParticipantsContainer);
+                          remoteParticipantsLayout->setContentsMargins(4, 4, 4, 4);
+                          remoteParticipantsLayout->setSpacing(4);
+                          remoteParticipantsContainer->show();
+                          outerLayout->addWidget(remoteParticipantsContainer);
+                      }
+                  }
 
-                hostVideoLabels.insert(senderIp, label);
-            }
+                  QLabel *videoLabel = nullptr;
+                  QLabel *micIcon = nullptr;
+                  QLabel *cameraIcon = nullptr;
+                  QWidget *tile = createParticipantVideoTile(senderIp,
+                                                             &videoLabel,
+                                                             &micIcon,
+                                                             &cameraIcon);
+                  label = videoLabel;
+                  hostVideoLabels.insert(senderIp, label);
+                  if (!senderIp.isEmpty()) {
+                      if (micIcon) {
+                          hostVideoMicIconLabels.insert(senderIp, micIcon);
+                      }
+                      if (cameraIcon) {
+                          hostVideoCameraIconLabels.insert(senderIp, cameraIcon);
+                      }
+                  }
+
+                  if (remoteParticipantsLayout) {
+                      remoteParticipantsLayout->addWidget(tile);
+                      rebuildRemoteParticipantGrid();
+                  }
+              }
 
             QImage image;
             if (!image.loadFromData(datagram, "JPG")) {
@@ -749,8 +1020,8 @@ void MainWindow::initHostVideoReceiver()
 // Host-side: lazily create and bind the UDP socket used to receive
 // audio frames from all connected participants and perform a simple
 // mixing before sending to AudioEngine for playback.
-void MainWindow::initHostAudioMixer()
-{
+  void MainWindow::initHostAudioMixer()
+  {
     if (hostAudioRecvSocket) {
         return;
     }
@@ -775,12 +1046,13 @@ void MainWindow::initHostAudioMixer()
         }
 
         // 一次 readyRead 内将当前所有待处理的数据包进行简单叠加混音。
-        QVector<QByteArray> packets;
+          QVector<QByteArray> packets;
+          QHash<QString, double> levels;
         qint64 maxSize = 0;
 
         while (hostAudioRecvSocket && hostAudioRecvSocket->hasPendingDatagrams()) {
-            QByteArray datagram;
-            datagram.resize(int(hostAudioRecvSocket->pendingDatagramSize()));
+              QByteArray datagram;
+              datagram.resize(int(hostAudioRecvSocket->pendingDatagramSize()));
             QHostAddress senderAddr;
             quint16 senderPort = 0;
             const qint64 read =
@@ -793,14 +1065,30 @@ void MainWindow::initHostAudioMixer()
             if (read < datagram.size()) {
                 datagram.resize(int(read));
             }
-            if (datagram.isEmpty()) {
-                continue;
-            }
-            packets.push_back(datagram);
-            if (datagram.size() > maxSize) {
-                maxSize = datagram.size();
-            }
-        }
+              if (datagram.isEmpty()) {
+                  continue;
+              }
+              packets.push_back(datagram);
+              if (datagram.size() > maxSize) {
+                  maxSize = datagram.size();
+              }
+
+              // 简单的说话人检测：计算每个 IP 的音频能量（平均绝对值）
+              if (!senderAddr.isNull()) {
+                  const QString senderIp = senderAddr.toString();
+                  const int sampleCount = datagram.size() / 2;
+                  if (sampleCount > 0) {
+                      const auto *samples =
+                          reinterpret_cast<const qint16 *>(datagram.constData());
+                      double sum = 0.0;
+                      for (int i = 0; i < sampleCount; ++i) {
+                          sum += std::abs(samples[i]);
+                      }
+                      const double level = sum / double(sampleCount);
+                      levels[senderIp] = qMax(levels.value(senderIp, 0.0), level);
+                  }
+              }
+          }
 
         if (packets.isEmpty() || maxSize <= 0) {
             return;
@@ -828,7 +1116,30 @@ void MainWindow::initHostAudioMixer()
             }
         }
 
-        audio->playAudio(mixed);
+          audio->playAudio(mixed);
+
+          // 选择当前能量最大的一个作为简单的“当前发言者”
+          QString newActiveSpeaker;
+          double maxLevel = 0.0;
+          const double threshold = 500.0; // 简单阈值，避免环境噪声触发
+          for (auto it = levels.constBegin(); it != levels.constEnd(); ++it) {
+              if (it.value() > maxLevel) {
+                  maxLevel = it.value();
+                  newActiveSpeaker = it.key();
+              }
+          }
+          if (!newActiveSpeaker.isEmpty() && maxLevel > threshold) {
+              if (newActiveSpeaker != activeSpeakerIp) {
+                  activeSpeakerIp = newActiveSpeaker;
+                  rebuildRemoteParticipantGrid();
+              }
+          } else if (!levels.isEmpty() && maxLevel <= threshold) {
+              // 没有明显发言者时清除高亮
+              if (!activeSpeakerIp.isEmpty()) {
+                  activeSpeakerIp.clear();
+                  rebuildRemoteParticipantGrid();
+              }
+          }
 
         // 将混音后的会议音频广播给所有已知的客户端（每个客户端在本地使用 AudioTransport 播放）。
         for (const QString &ip : std::as_const(activeClientIps)) {
@@ -840,10 +1151,10 @@ void MainWindow::initHostAudioMixer()
     });
 }
 
-void MainWindow::updateControlsForMeetingState()
-{
-    const bool inMeeting = (meetingState == MeetingState::InMeeting);
-    const bool idle = (meetingState == MeetingState::Idle);
+  void MainWindow::updateControlsForMeetingState()
+  {
+      const bool inMeeting = (meetingState == MeetingState::InMeeting);
+      const bool idle = (meetingState == MeetingState::Idle);
 
     if (btnCreateRoom) {
         btnCreateRoom->setEnabled(idle);
@@ -851,13 +1162,24 @@ void MainWindow::updateControlsForMeetingState()
     if (btnJoinRoom) {
         btnJoinRoom->setEnabled(idle);
     }
-    if (btnLeaveRoom) {
-        btnLeaveRoom->setEnabled(!idle);
-    }
-    if (btnMute) {
-        btnMute->setEnabled(inMeeting);
-        btnMute->setChecked(inMeeting && audioMuted);
-    }
+      if (btnLeaveRoom) {
+          btnLeaveRoom->setEnabled(!idle);
+      }
+      if (btnMute) {
+          btnMute->setEnabled(inMeeting);
+          btnMute->setChecked(inMeeting && audioMuted);
+      }
+      if (btnCamera) {
+          btnCamera->setEnabled(inMeeting);
+          btnCamera->setChecked(inMeeting && !cameraEnabled);
+      }
+      if (btnScreenShare) {
+          const bool canShare = inMeeting && meetingRole == MeetingRole::Host;
+          btnScreenShare->setEnabled(canShare);
+          if (!canShare) {
+              btnScreenShare->setChecked(false);
+          }
+      }
 
     const bool chatEnabled = inMeeting;
     if (ui->chatLineEdit) {
@@ -867,13 +1189,15 @@ void MainWindow::updateControlsForMeetingState()
         ui->btnSendChat->setEnabled(chatEnabled);
     }
 
-    if (btnToggleSidePanel && ui->sidePanel) {
-        if (inMeeting) {
-            btnToggleSidePanel->setChecked(true);
-            ui->sidePanel->setVisible(true);
-        }
-    }
-}
+      if (btnToggleSidePanel && ui->sidePanel) {
+          if (inMeeting) {
+              btnToggleSidePanel->setChecked(true);
+              ui->sidePanel->setVisible(true);
+          }
+      }
+
+      updateLocalMediaStateIcons();
+  }
 
 void MainWindow::updateMeetingStatusLabel()
 {
@@ -1188,6 +1512,7 @@ void MainWindow::on_btnJoinRoom_clicked()
         if (audioNet) {
             audioNet->setMuted(true);
         }
+        updateLocalMediaStateIcons();
     }
 
     if (!client) {

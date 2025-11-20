@@ -71,6 +71,43 @@ void ControlServer::sendChatToAll(const QString &message)
     }
 }
 
+void ControlServer::broadcastMediaState(const QString &ip, bool micMuted, bool cameraEnabled)
+{
+    if (m_clients.isEmpty()) {
+        return;
+    }
+
+    const QByteArray line = QByteArrayLiteral("STATE:MEDIA;ip=") + ip.toUtf8()
+                            + QByteArrayLiteral(";mic=") + (micMuted ? "1" : "0")
+                            + QByteArrayLiteral(";cam=") + (cameraEnabled ? "1" : "0")
+                            + '\n';
+
+    for (QTcpSocket *socket : std::as_const(m_clients)) {
+        if (!socket || socket->state() != QAbstractSocket::ConnectedState) {
+            continue;
+        }
+        socket->write(line);
+    }
+}
+
+void ControlServer::broadcastScreenShareState(const QString &ip, bool sharing)
+{
+    if (m_clients.isEmpty()) {
+        return;
+    }
+
+    const QByteArray line = QByteArrayLiteral("STATE:SCREEN;ip=") + ip.toUtf8()
+                            + QByteArrayLiteral(";on=") + (sharing ? "1" : "0")
+                            + '\n';
+
+    for (QTcpSocket *socket : std::as_const(m_clients)) {
+        if (!socket || socket->state() != QAbstractSocket::ConnectedState) {
+            continue;
+        }
+        socket->write(line);
+    }
+}
+
 void ControlServer::onNewConnection()
 {
     while (m_server->hasPendingConnections()) {
@@ -127,6 +164,37 @@ void ControlServer::onReadyRead()
                 const QString msg = QString::fromUtf8(line.mid(5));
                 LOG_INFO(QStringLiteral("ControlServer: chat from %1 - %2").arg(clientIp, msg));
                 emit chatReceived(clientIp, msg);
+            } else if (line.startsWith(QByteArrayLiteral("MEDIA:"))) {
+                // Format: MEDIA:mic=0/1;cam=0/1
+                bool micMuted = false;
+                bool cameraEnabled = true;
+
+                const QList<QByteArray> parts = line.mid(6).split(';');
+                for (const QByteArray &part : parts) {
+                    if (part.startsWith(QByteArrayLiteral("mic="))) {
+                        const QByteArray v = part.mid(4).trimmed();
+                        micMuted = (v == "1");
+                    } else if (part.startsWith(QByteArrayLiteral("cam="))) {
+                        const QByteArray v = part.mid(4).trimmed();
+                        cameraEnabled = (v != "0");
+                    }
+                }
+
+                emit mediaStateChanged(clientIp, micMuted, cameraEnabled);
+                broadcastMediaState(clientIp, micMuted, cameraEnabled);
+            } else if (line.startsWith(QByteArrayLiteral("SCREEN:"))) {
+                // Format: SCREEN:on=0/1
+                bool sharing = false;
+                const QList<QByteArray> parts = line.mid(7).split(';');
+                for (const QByteArray &part : parts) {
+                    if (part.startsWith(QByteArrayLiteral("on="))) {
+                        const QByteArray v = part.mid(3).trimmed();
+                        sharing = (v == "1");
+                    }
+                }
+
+                emit screenShareStateChanged(clientIp, sharing);
+                broadcastScreenShareState(clientIp, sharing);
             }
         }
     }

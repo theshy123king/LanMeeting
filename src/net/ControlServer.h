@@ -17,11 +17,15 @@ public:
     bool startServer(quint16 port = Config::CONTROL_PORT);
     void stopServer();
     void sendChatToAll(const QString &message);
+    void broadcastMediaState(const QString &ip, bool micMuted, bool cameraEnabled);
+    void broadcastScreenShareState(const QString &ip, bool sharing);
 
 signals:
     void clientJoined(const QString &ip);
     void clientLeft(const QString &ip);
     void chatReceived(const QString &ip, const QString &message);
+    void mediaStateChanged(const QString &ip, bool micMuted, bool cameraEnabled);
+    void screenShareStateChanged(const QString &ip, bool sharing);
 
 private slots:
     void onNewConnection();

@@ -31,9 +31,11 @@ class QWidget;
 class QEvent;
 class QResizeEvent;
 class QHBoxLayout;
+class QGridLayout;
 class QUdpSocket;
 class QLabel;
 class ScreenShareWidget;
+class QCheckBox;
 
 class MainWindow : public QMainWindow
 {
@@ -97,37 +99,66 @@ private:
     QLabel *screenShareOverlayLabel;
     ScreenShareWidget *screenShareWidget;
 
+    // Host-side container that arranges multiple remote videos
+    // in a simple grid layout depending on participant count.
+    QWidget *remoteParticipantsContainer;
+    QGridLayout *remoteParticipantsLayout;
+
+    // Local self-view overlay: display name and media state icons.
+    QLabel *localNameLabel;
+    QLabel *localMicIconLabel;
+    QLabel *localCameraIconLabel;
+
+    // Guest-side remote host info bar (nickname + media state).
+    QLabel *remoteHostNameLabel;
+    QLabel *remoteHostMicIconLabel;
+    QLabel *remoteHostCameraIconLabel;
+
     QWidget *controlBar;
     QToolButton *btnToggleSidePanel;
     QToolButton *btnCreateRoom;
     QToolButton *btnJoinRoom;
     QToolButton *btnLeaveRoom;
     QToolButton *btnMute;
+    QToolButton *btnCamera;
     QToolButton *btnScreenShare;
     QTimer *controlBarHideTimer;
     QWidget *controlsContainer;
     QTimer *screenShareHideTimer;
+    QCheckBox *screenFitCheckBox;
 
     bool isDraggingPreview;
     QPoint previewDragStartPos;
     QPoint previewStartPos;
 
-    // Host-side multi-remote video receiving
-    QUdpSocket *hostVideoRecvSocket;
-    QHash<QString, QLabel *> hostVideoLabels;
+      // Host-side multi-remote video receiving
+      QUdpSocket *hostVideoRecvSocket;
+      QHash<QString, QLabel *> hostVideoLabels;
+      QHash<QString, QLabel *> hostVideoMicIconLabels;
+      QHash<QString, QLabel *> hostVideoCameraIconLabels;
     // Host-side multi-remote audio receiving & mixing
     QUdpSocket *hostAudioRecvSocket;
-    QSet<QString> activeClientIps;
+      QSet<QString> activeClientIps;
 
     MeetingRole meetingRole;
     MeetingState meetingState;
-    QString currentRemoteIp;
-    bool audioTransportActive;
-    bool videoTransportActive;
-    bool audioMuted;
-    int connectedClientCount;
-    QStringList participantNames;
-    QImage lastScreenShareFrame;
-};
+      QString currentRemoteIp;
+      bool audioTransportActive;
+      bool videoTransportActive;
+      bool audioMuted;
+      bool cameraEnabled;
+      int connectedClientCount;
+      QStringList participantNames;
+      QImage lastScreenShareFrame;
+      QString activeSpeakerIp;
+
+      // Layout helpers
+      void rebuildRemoteParticipantGrid();
+      QWidget *createParticipantVideoTile(const QString &displayName,
+                                          QLabel **outVideoLabel,
+                                          QLabel **outMicIconLabel,
+                                          QLabel **outCameraIconLabel);
+      void updateLocalMediaStateIcons();
+  };
 
 #endif // MAINWINDOW_H

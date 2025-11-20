@@ -9,6 +9,8 @@
 #include <QtGlobal>
 #include <QByteArray>
 #include <QHash>
+#include <QThread>
+#include <QRect>
 
 // Internal assembly state for a single screen-share frame on the receiver side.
 struct ScreenShareFrameAssembly
@@ -19,6 +21,7 @@ struct ScreenShareFrameAssembly
 };
 
 class QLabel;
+class ScreenShareSenderWorker;
 
 // Lightweight screen sharing transport:
 // - On host side: captures the primary screen periodically and sends JPEG
@@ -35,6 +38,10 @@ public:
 
     // Host-side API
     void setDestinations(const QSet<QString> &ips);
+    // Capture the entire primary screen (default behaviour).
+    void setCaptureFullScreen();
+    // Capture a specific region (in global screen coordinates).
+    void setCaptureRegion(const QRect &rect);
     bool startSender(quint16 remotePort);
     void stopSender();
     bool isSending() const { return m_sending; }
@@ -44,11 +51,23 @@ public:
     void stopReceiver();
     bool isReceiving() const { return m_receiving; }
     void setRenderLabel(QLabel *label);
+    // Control how the incoming frames are scaled into the
+    // render label on the client side.
+    void setRenderFitToWindow(bool fit);
 
 signals:
     // Emitted on the client side whenever a new screen frame
     // has been decoded while in receiving mode.
     void screenFrameReceived(const QImage &image);
+
+    // Emitted on the host side after the GUI thread has captured
+    // and downscaled a screen image and encoded it to JPEG. The
+    // heavy UDP fragmentation and sending work is performed in a
+    // dedicated background thread to avoid blocking audio/video.
+    void encodedFrameReady(const QByteArray &encodedFrame,
+                           const QSet<QString> &destIps,
+                           quint16 remotePort,
+                           quint32 frameId);
 
 private slots:
     void onSendTimer();
@@ -57,6 +76,10 @@ private slots:
 private:
     QUdpSocket *m_socket;
     QTimer *m_sendTimer;
+
+    // Dedicated worker thread for sending screen-share UDP packets.
+    QThread m_sendThread;
+    ScreenShareSenderWorker *m_senderWorker;
 
     QSet<QString> m_destIps;
     quint16 m_remotePort;
@@ -72,6 +95,12 @@ private:
     // Receiver-side in-flight frame assemblies.
     QHash<quint32, ScreenShareFrameAssembly> m_pendingFrames;
     qint64 m_lastCleanupMs = 0;
+
+    // Optional capture region in screen coordinates; if null,
+    // the full screen is captured.
+    QRect m_captureRect;
+    // Client-side scaling mode for m_renderLabel rendering.
+    bool m_renderFitToWindow = true;
 };
 
 #endif // SCREENSHARETRANSPORT_H
