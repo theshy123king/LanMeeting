@@ -379,6 +379,7 @@ void MediaTransport::onReadyRead()
                         remoteVideoLabel->setPixmap(QPixmap::fromImage(image).scaled(remoteVideoLabel->size(),
                                                                                      Qt::KeepAspectRatio,
                                                                                      Qt::SmoothTransformation));
+                        emit remoteFrameReceived();
                     } else {
                         LOG_WARN(QStringLiteral("MediaTransport: decoded frame produced null image"));
                     }
@@ -404,6 +405,7 @@ void MediaTransport::onReadyRead()
             remoteVideoLabel->setPixmap(QPixmap::fromImage(image).scaled(remoteVideoLabel->size(),
                                                                          Qt::KeepAspectRatio,
                                                                          Qt::SmoothTransformation));
+            emit remoteFrameReceived();
         }
     }
 }

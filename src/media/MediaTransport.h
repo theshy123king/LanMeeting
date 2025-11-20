@@ -30,6 +30,11 @@ public:
 
     QWidget *getRemoteVideoWidget();
 
+signals:
+    // Emitted whenever a remote video frame has been
+    // successfully decoded and rendered to the label.
+    void remoteFrameReceived();
+
 private slots:
     void onSendTimer();
     void onReadyRead();

@@ -1,6 +1,8 @@
 ﻿#include "mainwindow.h"
 #include "./ui_mainwindow.h"
 
+#include <QApplication>
+#include <QApplication>
 #include <QInputDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -16,7 +18,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
-#include <QTextBrowser>
+#include <QListWidget>
 #include <QUdpSocket>
 #include <QHostAddress>
 #include <QStyle>
@@ -24,6 +26,7 @@
 
 #include "common/Config.h"
 #include "ScreenShareWidget.h"
+#include "ChatMessageWidget.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -71,6 +74,9 @@ MainWindow::MainWindow(QWidget *parent)
     , audioMuted(false)
     , cameraEnabled(true)
     , connectedClientCount(0)
+    , guestReconnectTimer(nullptr)
+    , guestReconnectAttempts(0)
+    , guestManualLeave(false)
 {
     ui->setupUi(this);
 
@@ -191,6 +197,11 @@ MainWindow::MainWindow(QWidget *parent)
             this,
             &MainWindow::onScreenShareFrameReceived);
 
+    // Guest 侧音视频 / 屏幕共享超时与自动重连相关定时器
+    guestReconnectTimer = new QTimer(this);
+    guestReconnectTimer->setInterval(2000);
+    guestReconnectTimer->setSingleShot(false);
+
     updateOverlayGeometry();
     updateControlsForMeetingState();
 }
@@ -265,6 +276,10 @@ void MainWindow::initLayout()
     }
     if (ui->chatLineEdit) {
         ui->chatLineEdit->setPlaceholderText(QStringLiteral("Type a message..."));
+        connect(ui->chatLineEdit,
+                &QLineEdit::returnPressed,
+                this,
+                &MainWindow::on_btnSendChat_clicked);
     }
     if (ui->btnSendChat) {
         ui->btnSendChat->setText(QStringLiteral("Send"));
@@ -272,6 +287,16 @@ void MainWindow::initLayout()
       if (ui->labelParticipants) {
           ui->labelParticipants->setText(QStringLiteral("Participants"));
       }
+
+    if (ui->chatList) {
+        ui->chatList->setFrameShape(QFrame::NoFrame);
+        ui->chatList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        ui->chatList->setSelectionMode(QAbstractItemView::NoSelection);
+        ui->chatList->setFocusPolicy(Qt::NoFocus);
+        ui->chatList->setResizeMode(QListView::Adjust);
+        ui->chatList->setUniformItemSizes(false);
+        ui->chatList->setSpacing(2);
+    }
 
     if (ui->chkHideSelfView) {
         ui->chkHideSelfView->setText(QStringLiteral("Hide self view"));
@@ -1241,8 +1266,24 @@ void MainWindow::updateMeetingStatusLabel()
 
 void MainWindow::appendChatMessage(const QString &sender, const QString &message, bool isLocal)
 {
-    if (ui && ui->chatView) {
-        ui->chatView->append(QStringLiteral("%1: %2").arg(sender, message));
+    if (ui && ui->chatList) {
+        QListWidget *list = ui->chatList;
+        const bool isSystem =
+            sender.compare(QStringLiteral("System"), Qt::CaseInsensitive) == 0;
+
+        ChatMessageWidget::MessageKind kind = ChatMessageWidget::MessageKind::Remote;
+        if (isSystem) {
+            kind = ChatMessageWidget::MessageKind::System;
+        } else if (isLocal) {
+            kind = ChatMessageWidget::MessageKind::Local;
+        }
+
+        auto *widget = new ChatMessageWidget(sender, message, kind, list);
+        auto *item = new QListWidgetItem(list);
+        item->setFlags(item->flags() & ~Qt::ItemIsSelectable & ~Qt::ItemIsEnabled);
+        item->setSizeHint(widget->sizeHint());
+        list->setItemWidget(item, widget);
+        list->scrollToBottom();
     }
 
     if (isLocal) {

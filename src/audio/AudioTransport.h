@@ -38,6 +38,10 @@ signals:
                             const QString &remoteIp,
                             quint16 remotePort);
 
+    // Emitted on the receive side whenever a remote audio
+    // packet is successfully read and queued for playback.
+    void audioFrameReceived();
+
 private:
     QUdpSocket *udpRecvSocket;
     quint16 localPort;

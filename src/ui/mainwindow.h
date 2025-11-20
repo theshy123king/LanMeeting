@@ -36,6 +36,7 @@ class QUdpSocket;
 class QLabel;
 class ScreenShareWidget;
 class QCheckBox;
+class QTimer;
 
 class MainWindow : public QMainWindow
 {
@@ -151,6 +152,11 @@ private:
       QStringList participantNames;
       QImage lastScreenShareFrame;
       QString activeSpeakerIp;
+
+      // Guest 侧简单自动重连
+      QTimer *guestReconnectTimer;
+      int guestReconnectAttempts;
+      bool guestManualLeave;
 
       // Layout helpers
       void rebuildRemoteParticipantGrid();

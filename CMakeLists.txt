@@ -25,6 +25,8 @@ set(PROJECT_SOURCES
         src/ui/mainwindow.cpp
         src/ui/mainwindow.h
         src/ui/mainwindow.ui
+        src/ui/ChatMessageWidget.cpp
+        src/ui/ChatMessageWidget.h
         src/ui/ScreenShareWidget.cpp
         src/ui/ScreenShareWidget.h
         src/audio/AudioEngine.cpp

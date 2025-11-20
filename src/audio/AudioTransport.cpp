@@ -186,6 +186,7 @@ void AudioTransport::onReadyRead()
         }
 
         audio->playAudio(buffer);
+        emit audioFrameReceived();
     }
 }
 
