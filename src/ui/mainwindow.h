@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QPoint>
 #include <QStringList>
+#include <QMap>
 #include <QHash>
 #include <QSet>
 #include <QImage>
@@ -59,6 +60,15 @@ public:
         InMeeting
     };
 
+    struct ParticipantInfo {
+        QString key;
+        QString displayName;
+        QString ip;
+        bool micMuted = false;
+        bool cameraEnabled = true;
+        bool isLocal = false;
+    };
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -87,6 +97,22 @@ private:
     void initHostAudioMixer();
     void onScreenShareFrameReceived(const QImage &image);
     void updateScreenSharePixmap();
+    QString localParticipantKey() const;
+    QString hostParticipantKey() const;
+    void upsertParticipant(const QString &key,
+                           const QString &displayName,
+                           const QString &ip,
+                           bool micMuted,
+                           bool cameraEnabled,
+                           bool isLocal);
+    void removeParticipant(const QString &key);
+    void updateParticipantMediaStateByKey(const QString &key,
+                                          bool micMuted,
+                                          bool cameraEnabled);
+    void updateParticipantMediaStateByIp(const QString &ip,
+                                         bool micMuted,
+                                         bool cameraEnabled);
+    void broadcastLocalMediaState();
 
     Ui::MainWindow *ui;
     QLabel *statusLabel;
@@ -143,15 +169,16 @@ private:
 
     MeetingRole meetingRole;
     MeetingState meetingState;
-      QString currentRemoteIp;
-      bool audioTransportActive;
-      bool videoTransportActive;
-      bool audioMuted;
-      bool cameraEnabled;
-      int connectedClientCount;
-      QStringList participantNames;
-      QImage lastScreenShareFrame;
-      QString activeSpeakerIp;
+    QString currentRemoteIp;
+    bool audioTransportActive;
+    bool videoTransportActive;
+    bool audioMuted;
+    bool cameraEnabled;
+    int connectedClientCount;
+    QMap<QString, ParticipantInfo> participantInfos;
+    QStringList participantOrder;
+    QImage lastScreenShareFrame;
+    QString activeSpeakerIp;
 
       // Guest 侧简单自动重连
       QTimer *guestReconnectTimer;

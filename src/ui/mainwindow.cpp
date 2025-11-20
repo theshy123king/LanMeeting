@@ -360,6 +360,7 @@ void MainWindow::updateLocalMediaStateIcons()
         localCameraIconLabel->setToolTip(cameraEnabled ? QStringLiteral("Camera on")
                                                        : QStringLiteral("Camera off"));
     }
+
 }
 
 void MainWindow::initFloatingControls()
@@ -417,6 +418,7 @@ void MainWindow::initFloatingControls()
           appendLogMessage(checked ? QStringLiteral("Mute enabled (local audio will not be sent)")
                                    : QStringLiteral("Mute disabled, local audio will be sent"));
           updateLocalMediaStateIcons();
+          broadcastLocalMediaState();
       });
 
       btnCamera = new QToolButton(controlsContainer);
@@ -440,6 +442,7 @@ void MainWindow::initFloatingControls()
               }
           }
           updateLocalMediaStateIcons();
+          broadcastLocalMediaState();
       });
 
       btnScreenShare = new QToolButton(controlsContainer);
@@ -712,7 +715,8 @@ void MainWindow::appendLogMessage(const QString &message)
     meetingState = MeetingState::Idle;
     currentRemoteIp.clear();
 
-    participantNames.clear();
+    participantInfos.clear();
+    participantOrder.clear();
     refreshParticipantListView();
     activeClientIps.clear();
 
@@ -1225,44 +1229,69 @@ void MainWindow::initHostVideoReceiver()
   }
 
 void MainWindow::updateMeetingStatusLabel()
+
 {
+
     if (!statusLabel) {
+
         return;
+
     }
 
-    // 计算除自己外的其他参会者数量
-    if (meetingRole == MeetingRole::Host) {
-        connectedClientCount = qMax(0, participantNames.size() - 1);
-    } else if (meetingRole == MeetingRole::Guest) {
-        connectedClientCount = qMax(0, participantNames.size() - 1);
-    } else {
-        connectedClientCount = 0;
-    }
+
+
+    const bool hasLocalParticipant = participantInfos.contains(localParticipantKey());
+
+    connectedClientCount = qMax(0, participantInfos.size() - (hasLocalParticipant ? 1 : 0));
+
+
 
     QString statusText;
 
+
+
     switch (meetingState) {
+
     case MeetingState::Idle:
+
         statusText = QStringLiteral("Not connected");
+
         break;
+
     case MeetingState::WaitingPeer: {
-        const int participants = 1 + connectedClientCount;
+
+        const int participants = connectedClientCount + (hasLocalParticipant ? 1 : 0);
+
         statusText = QStringLiteral("Meeting created, waiting for participants (currently %1)").arg(participants);
+
         break;
+
     }
+
     case MeetingState::Connecting:
+
         statusText = QStringLiteral("Joining meeting...");
+
         break;
+
     case MeetingState::InMeeting: {
-        const int participants = 1 + connectedClientCount;
+
+        const int participants = connectedClientCount + (hasLocalParticipant ? 1 : 0);
+
         statusText = QStringLiteral("In meeting (%1 participants)").arg(participants);
+
         break;
+
     }
+
     }
+
+
 
     statusLabel->setText(statusText);
     setWindowTitle(QStringLiteral("LAN Meeting - %1").arg(statusText));
 }
+
 
 void MainWindow::appendChatMessage(const QString &sender, const QString &message, bool isLocal)
 {
@@ -1295,15 +1324,169 @@ void MainWindow::appendChatMessage(const QString &sender, const QString &message
 
 void MainWindow::refreshParticipantListView()
 {
-    if (ui && ui->participantList) {
-        ui->participantList->clear();
-        for (const QString &name : participantNames) {
-            ui->participantList->addItem(name);
+    if (!ui || !ui->participantList) {
+        return;
+    }
+
+    QListWidget *list = ui->participantList;
+    list->clear();
+
+    QStyle *s = style();
+    const QIcon micOn = s ? s->standardIcon(QStyle::SP_MediaVolume) : QIcon();
+    const QIcon micOff = s ? s->standardIcon(QStyle::SP_MediaVolumeMuted) : QIcon();
+    const QIcon camOn = s ? s->standardIcon(QStyle::SP_DesktopIcon) : QIcon();
+    const QIcon camOff = s ? s->standardIcon(QStyle::SP_DialogCancelButton) : QIcon();
+
+    for (const QString &key : participantOrder) {
+        if (!participantInfos.contains(key)) {
+            continue;
         }
+        const ParticipantInfo info = participantInfos.value(key);
+
+        auto *item = new QListWidgetItem(list);
+        QWidget *row = new QWidget(list);
+        auto *layout = new QHBoxLayout(row);
+        layout->setContentsMargins(8, 4, 8, 4);
+        layout->setSpacing(6);
+
+        QLabel *nameLabel = new QLabel(info.displayName, row);
+        QFont f = nameLabel->font();
+        if (info.isLocal) {
+            f.setBold(true);
+            nameLabel->setFont(f);
+        }
+        layout->addWidget(nameLabel, 1);
+
+        QLabel *micLabel = new QLabel(row);
+        micLabel->setPixmap((info.micMuted ? micOff : micOn).pixmap(16, 16));
+        micLabel->setToolTip(info.micMuted ? QStringLiteral("Microphone muted")
+                                           : QStringLiteral("Microphone on"));
+        layout->addWidget(micLabel, 0, Qt::AlignRight);
+
+        QLabel *camLabel = new QLabel(row);
+        camLabel->setPixmap((info.cameraEnabled ? camOn : camOff).pixmap(16, 16));
+        camLabel->setToolTip(info.cameraEnabled ? QStringLiteral("Camera on")
+                                                : QStringLiteral("Camera off"));
+        layout->addWidget(camLabel, 0, Qt::AlignRight);
+
+        row->setLayout(layout);
+        item->setSizeHint(row->sizeHint());
+        list->addItem(item);
+        list->setItemWidget(item, row);
     }
 
     updateMeetingStatusLabel();
     updateControlsForMeetingState();
+}
+
+QString MainWindow::localParticipantKey() const
+{
+    return QStringLiteral("local");
+}
+
+QString MainWindow::hostParticipantKey() const
+{
+    return QStringLiteral("host");
+}
+
+void MainWindow::upsertParticipant(const QString &key,
+                                   const QString &displayName,
+                                   const QString &ip,
+                                   bool micMuted,
+                                   bool cameraEnabled,
+                                   bool isLocal)
+{
+    if (key.isEmpty()) {
+        return;
+    }
+
+    ParticipantInfo info;
+    info.key = key;
+    info.displayName = displayName;
+    info.ip = ip.isEmpty() ? key : ip;
+    info.micMuted = micMuted;
+    info.cameraEnabled = cameraEnabled;
+    info.isLocal = isLocal;
+
+    participantInfos.insert(key, info);
+    if (!participantOrder.contains(key)) {
+        participantOrder.append(key);
+    }
+
+    refreshParticipantListView();
+}
+
+void MainWindow::removeParticipant(const QString &key)
+{
+    if (key.isEmpty()) {
+        return;
+    }
+
+    participantInfos.remove(key);
+    participantOrder.removeAll(key);
+    refreshParticipantListView();
+}
+
+void MainWindow::updateParticipantMediaStateByKey(const QString &key,
+                                                  bool micMuted,
+                                                  bool cameraEnabled)
+{
+    if (key.isEmpty() || !participantInfos.contains(key)) {
+        return;
+    }
+
+    ParticipantInfo info = participantInfos.value(key);
+    if (info.micMuted == micMuted && info.cameraEnabled == cameraEnabled) {
+        return;
+    }
+
+    info.micMuted = micMuted;
+    info.cameraEnabled = cameraEnabled;
+    participantInfos.insert(key, info);
+    refreshParticipantListView();
+}
+
+void MainWindow::updateParticipantMediaStateByIp(const QString &ip,
+                                                 bool micMuted,
+                                                 bool cameraEnabled)
+{
+    if (ip.isEmpty()) {
+        return;
+    }
+
+    for (const QString &key : participantInfos.keys()) {
+        ParticipantInfo info = participantInfos.value(key);
+        const QString effectiveIp = info.ip.isEmpty() ? key : info.ip;
+        if (effectiveIp == ip) {
+            if (info.micMuted == micMuted && info.cameraEnabled == cameraEnabled) {
+                return;
+            }
+            info.micMuted = micMuted;
+            info.cameraEnabled = cameraEnabled;
+            participantInfos.insert(key, info);
+            refreshParticipantListView();
+            return;
+        }
+    }
+
+    // If we reach here, add a placeholder participant for this IP.
+    const QString display = QStringLiteral("Participant (%1)").arg(ip);
+    upsertParticipant(ip, display, ip, micMuted, cameraEnabled, false);
+}
+
+void MainWindow::broadcastLocalMediaState()
+{
+    updateParticipantMediaStateByKey(localParticipantKey(), audioMuted, cameraEnabled);
+
+    if (meetingState != MeetingState::InMeeting) {
+        return;
+    }
+
+    if (meetingRole == MeetingRole::Host && server) {
+        server->broadcastMediaState(hostParticipantKey(), audioMuted, cameraEnabled);
+    } else if (meetingRole == MeetingRole::Guest && client) {
+        client->sendMediaState(audioMuted, cameraEnabled);
+    }
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
@@ -1403,10 +1586,7 @@ void MainWindow::on_btnCreateRoom_clicked()
             appendLogMessage(QStringLiteral("控制连接收到客户端加入：%1").arg(ip));
 
             const QString displayName = QStringLiteral("Participant (%1)").arg(ip);
-            if (!participantNames.contains(displayName)) {
-                participantNames.append(displayName);
-                refreshParticipantListView();
-            }
+            upsertParticipant(ip, displayName, ip, false, true, false);
             activeClientIps.insert(ip);
 
             appendChatMessage(QStringLiteral("System"),
@@ -1456,8 +1636,7 @@ void MainWindow::on_btnCreateRoom_clicked()
             const QString displayName = QStringLiteral("Participant (%1)").arg(ip);
             appendLogMessage(QStringLiteral("服务器检测到客户端离开：%1").arg(ip));
 
-            participantNames.removeAll(displayName);
-            refreshParticipantListView();
+            removeParticipant(ip);
             activeClientIps.remove(ip);
 
             appendChatMessage(QStringLiteral("System"),
@@ -1483,6 +1662,13 @@ void MainWindow::on_btnCreateRoom_clicked()
             Q_UNUSED(ip);
             appendChatMessage(QStringLiteral("Remote"), msg, false);
         });
+
+        connect(server,
+                &ControlServer::mediaStateChanged,
+                this,
+                [this](const QString &ip, bool micMuted, bool cameraEnabled) {
+                    updateParticipantMediaStateByIp(ip, micMuted, cameraEnabled);
+                });
     }
 
     if (server->startServer()) {
@@ -1492,9 +1678,14 @@ void MainWindow::on_btnCreateRoom_clicked()
         meetingRole = MeetingRole::Host;
         meetingState = MeetingState::WaitingPeer;
 
-        participantNames.clear();
-        participantNames << QStringLiteral("Me (Host)");
-        refreshParticipantListView();
+        participantInfos.clear();
+        participantOrder.clear();
+        upsertParticipant(localParticipantKey(),
+                          QStringLiteral("Me (Host)"),
+                          hostParticipantKey(),
+                          audioMuted,
+                          cameraEnabled,
+                          true);
 
         appendChatMessage(QStringLiteral("System"),
                           QStringLiteral("You created a meeting and are waiting for participants."),
@@ -1573,9 +1764,23 @@ void MainWindow::on_btnJoinRoom_clicked()
             meetingRole = MeetingRole::Guest;
             meetingState = MeetingState::InMeeting;
 
-            participantNames.clear();
-            participantNames << QStringLiteral("Me") << QStringLiteral("Host");
-            refreshParticipantListView();
+            participantInfos.clear();
+            participantOrder.clear();
+            upsertParticipant(localParticipantKey(),
+                              QStringLiteral("Me"),
+                              localParticipantKey(),
+                              audioMuted,
+                              cameraEnabled,
+                              true);
+            const QString hostLabel = currentRemoteIp.isEmpty()
+                                           ? QStringLiteral("Host")
+                                           : QStringLiteral("Host (%1)").arg(currentRemoteIp);
+            upsertParticipant(hostParticipantKey(),
+                              hostLabel,
+                              hostParticipantKey(),
+                              false,
+                              true,
+                              false);
 
             appendChatMessage(QStringLiteral("System"),
                               QStringLiteral("You joined the meeting"),
@@ -1583,6 +1788,7 @@ void MainWindow::on_btnJoinRoom_clicked()
 
             appendLogMessage(QStringLiteral("控制连接握手成功，已加入会议"));
             startClientMediaTransports();
+            broadcastLocalMediaState();
 
             // 客户端端：开始接收主持人屏幕共享画面
             if (screenShare && ui->screenShareLabel) {
@@ -1602,6 +1808,13 @@ void MainWindow::on_btnJoinRoom_clicked()
         connect(client, &ControlClient::chatReceived, this, [this](const QString &msg) {
             appendChatMessage(QStringLiteral("Remote"), msg, false);
         });
+
+        connect(client,
+                &ControlClient::mediaStateUpdated,
+                this,
+                [this](const QString &ip, bool micMuted, bool cameraEnabled) {
+                    updateParticipantMediaStateByIp(ip, micMuted, cameraEnabled);
+                });
     }
 
     client->connectToHost(ip, Config::CONTROL_PORT);
