@@ -89,6 +89,8 @@ if(ENABLE_FFMPEG)
 
     include_directories(${FFMPEG_INCLUDE_DIR})
     link_directories(${FFMPEG_LIB_DIR})
+    include_directories("D:/dev/ffmpeg/include")
+    link_directories("D:/dev/ffmpeg/lib")
 
     # MinGW: explicitly look for import libraries lib*.dll.a
     find_library(FFMPEG_AVCODEC NAMES libavcodec.dll.a   HINTS ${FFMPEG_LIB_DIR})
@@ -117,6 +119,7 @@ if(ENABLE_FFMPEG)
             target_link_libraries(LanMeeting PRIVATE ${FFMPEG_SWRESAMPLE})
         endif()
         target_compile_definitions(LanMeeting PRIVATE USE_FFMPEG_H264)
+
     endif()
 endif()
 

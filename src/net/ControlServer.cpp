@@ -6,9 +6,26 @@
 ControlServer::ControlServer(QObject *parent)
     : QObject(parent)
     , m_server(new QTcpServer(this))
+    , m_pingTimer(new QTimer(this))
+    , m_elapsed()
+    , m_lastPongMs(0)
 {
     connect(m_server, &QTcpServer::newConnection,
             this, &ControlServer::onNewConnection);
+
+    m_pingTimer->setInterval(5000);
+    connect(m_pingTimer, &QTimer::timeout, this, [this]() {
+        if (!m_elapsed.isValid()) {
+            m_elapsed.start();
+            m_lastPongMs = m_elapsed.elapsed();
+            return;
+        }
+        const qint64 now = m_elapsed.elapsed();
+        if (m_lastPongMs > 0 && now - m_lastPongMs > 30000) {
+            LOG_INFO(QStringLiteral("ControlServer: no client ping seen in >30s"));
+        }
+    });
+    m_pingTimer->start();
 }
 
 bool ControlServer::startServer(quint16 port)
@@ -160,6 +177,13 @@ void ControlServer::onReadyRead()
             } else if (line == QByteArrayLiteral("LEAVE")) {
                 LOG_INFO(QStringLiteral("ControlServer: LEAVE received from %1").arg(clientIp));
                 socket->disconnectFromHost();
+            } else if (line == QByteArrayLiteral("PING")) {
+                socket->write("PONG\n");
+                socket->flush();
+                if (!m_elapsed.isValid()) {
+                    m_elapsed.start();
+                }
+                m_lastPongMs = m_elapsed.elapsed();
             } else if (line.startsWith(QByteArrayLiteral("CHAT:"))) {
                 const QString msg = QString::fromUtf8(line.mid(5));
                 LOG_INFO(QStringLiteral("ControlServer: chat from %1 - %2").arg(clientIp, msg));

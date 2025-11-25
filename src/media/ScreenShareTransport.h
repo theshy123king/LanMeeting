@@ -11,6 +11,7 @@
 #include <QHash>
 #include <QThread>
 #include <QRect>
+#include <QVector>
 
 // Internal assembly state for a single screen-share frame on the receiver side.
 struct ScreenShareFrameAssembly
@@ -22,6 +23,7 @@ struct ScreenShareFrameAssembly
 
 class QLabel;
 class ScreenShareSenderWorker;
+class ScreenShareCaptureWorker;
 
 // Lightweight screen sharing transport:
 // - On host side: captures the primary screen periodically and sends JPEG
@@ -33,6 +35,14 @@ class ScreenShareTransport : public QObject
     Q_OBJECT
 
 public:
+    struct CaptureSettings
+    {
+        int maxWidth = 0;
+        int maxHeight = 0;
+        int jpegQuality = 0;
+        QRect captureRect;
+    };
+
     explicit ScreenShareTransport(QObject *parent = nullptr);
     ~ScreenShareTransport() override;
 
@@ -54,6 +64,7 @@ public:
     // Control how the incoming frames are scaled into the
     // render label on the client side.
     void setRenderFitToWindow(bool fit);
+    void logDiagnostics() const;
 
 signals:
     // Emitted on the client side whenever a new screen frame
@@ -68,10 +79,14 @@ signals:
                            const QSet<QString> &destIps,
                            quint16 remotePort,
                            quint32 frameId);
+    void requestCapture();
 
 private slots:
     void onSendTimer();
     void onReadyRead();
+    void onBandwidthSample(qint64 bytesPerSec);
+    void applyQualityPreset();
+    void onFrameReady(const QByteArray &jpeg, int width, int height);
 
 private:
     QUdpSocket *m_socket;
@@ -80,6 +95,9 @@ private:
     // Dedicated worker thread for sending screen-share UDP packets.
     QThread m_sendThread;
     ScreenShareSenderWorker *m_senderWorker;
+    // Dedicated worker thread for capture/scale/encode.
+    QThread *m_captureThread = nullptr;
+    ScreenShareCaptureWorker *m_captureWorker = nullptr;
 
     QSet<QString> m_destIps;
     quint16 m_remotePort;
@@ -101,6 +119,17 @@ private:
     QRect m_captureRect;
     // Client-side scaling mode for m_renderLabel rendering.
     bool m_renderFitToWindow = true;
+
+    int m_qualityLevel = 2; // 0=low,1=medium,2=high
+    qint64 m_lastAdjustMs = 0;
+    QVector<qint64> m_sendHistory;
+    qint64 m_lastBandwidthSample = 0;
+    int m_currentTargetFps = 0;
+    int m_currentMaxWidth = 0;
+    int m_currentMaxHeight = 0;
+    int m_currentJpegQuality = 0;
+    qint64 m_lastFrameSentMs = 0;
+    CaptureSettings m_captureSettings;
 };
 
 #endif // SCREENSHARETRANSPORT_H

@@ -61,6 +61,7 @@ MainWindow::MainWindow(QWidget *parent)
     , controlsContainer(nullptr)
     , screenShareHideTimer(nullptr)
     , screenFitCheckBox(nullptr)
+    , diagTimer(nullptr)
     , hostVideoRecvSocket(nullptr)
     , hostAudioRecvSocket(nullptr)
     , isDraggingPreview(false)
@@ -201,6 +202,24 @@ MainWindow::MainWindow(QWidget *parent)
     guestReconnectTimer = new QTimer(this);
     guestReconnectTimer->setInterval(2000);
     guestReconnectTimer->setSingleShot(false);
+
+    diagTimer = new QTimer(this);
+    diagTimer->setInterval(12000);
+    connect(diagTimer, &QTimer::timeout, this, [this]() {
+        if (audioNet) {
+            audioNet->logDiagnostics();
+        }
+        if (videoNet) {
+            videoNet->logDiagnostics();
+        }
+        if (screenShare) {
+            screenShare->logDiagnostics();
+        }
+        if (client) {
+            LOG_INFO(QStringLiteral("ControlClient diag tick (heartbeat lastPong tracking active)"));
+        }
+    });
+    diagTimer->start();
 
     updateOverlayGeometry();
     updateControlsForMeetingState();

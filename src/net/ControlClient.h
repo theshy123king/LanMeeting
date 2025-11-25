@@ -3,8 +3,10 @@
 
 #include <QObject>
 #include <QTcpSocket>
+#include <QElapsedTimer>
 
 class QHostAddress;
+class QTimer;
 
 class ControlClient : public QObject
 {
@@ -32,11 +34,15 @@ private slots:
     void onReadyRead();
     void onError(QAbstractSocket::SocketError socketError);
     void onDisconnected();
+    void onPingTimer();
 
 private:
     QTcpSocket *m_socket;
     QByteArray m_buffer;
     bool m_joined;
+    QTimer *m_pingTimer;
+    QElapsedTimer m_elapsed;
+    qint64 m_lastPongMs;
 };
 
 #endif // CONTROLCLIENT_H

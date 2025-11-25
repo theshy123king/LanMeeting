@@ -153,6 +153,7 @@ private:
     QWidget *controlsContainer;
     QTimer *screenShareHideTimer;
     QCheckBox *screenFitCheckBox;
+    QTimer *diagTimer;
 
     bool isDraggingPreview;
     QPoint previewDragStartPos;

@@ -1,12 +1,16 @@
 #include "ControlClient.h"
 
 #include "common/Logger.h"
+#include <QTimer>
 
 ControlClient::ControlClient(QObject *parent)
     : QObject(parent)
     , m_socket(new QTcpSocket(this))
     , m_buffer()
     , m_joined(false)
+    , m_pingTimer(new QTimer(this))
+    , m_elapsed()
+    , m_lastPongMs(0)
 {
     connect(m_socket, &QTcpSocket::connected,
             this, &ControlClient::onConnected);
@@ -16,6 +20,9 @@ ControlClient::ControlClient(QObject *parent)
             this, &ControlClient::onError);
     connect(m_socket, &QTcpSocket::disconnected,
             this, &ControlClient::onDisconnected);
+
+    m_pingTimer->setInterval(5000);
+    connect(m_pingTimer, &QTimer::timeout, this, &ControlClient::onPingTimer);
 }
 
 void ControlClient::connectToHost(const QString &ip, quint16 port)
@@ -28,6 +35,8 @@ void ControlClient::connectToHost(const QString &ip, quint16 port)
 
     m_buffer.clear();
     m_joined = false;
+    m_lastPongMs = 0;
+    m_elapsed.invalidate();
 
     LOG_INFO(QStringLiteral("ControlClient connecting to %1:%2").arg(ip).arg(port));
     m_socket->connectToHost(ip, port);
@@ -54,6 +63,9 @@ void ControlClient::disconnectFromHost()
 void ControlClient::onConnected()
 {
     LOG_INFO(QStringLiteral("ControlClient connected, sending JOIN"));
+    m_elapsed.start();
+    m_lastPongMs = m_elapsed.elapsed();
+    m_pingTimer->start();
     m_socket->write("JOIN\n");
     m_socket->flush();
 }
@@ -95,6 +107,14 @@ void ControlClient::onReadyRead()
             const QString msg = QString::fromUtf8(line.mid(5));
             LOG_INFO(QStringLiteral("ControlClient: chat received - %1").arg(msg));
             emit chatReceived(msg);
+        } else if (line == QByteArrayLiteral("PONG")) {
+            if (m_elapsed.isValid()) {
+                const qint64 now = m_elapsed.elapsed();
+                const qint64 age = (m_lastPongMs > 0) ? (now - m_lastPongMs) : 0;
+                m_lastPongMs = now;
+                LOG_INFO(QStringLiteral("ControlClient heartbeat: pong age=%1ms health=ok")
+                             .arg(age));
+            }
         } else if (line.startsWith(QByteArrayLiteral("STATE:"))) {
             // Examples:
             // STATE:MEDIA;ip=1.2.3.4;mic=1;cam=0
@@ -152,6 +172,7 @@ void ControlClient::onDisconnected()
     LOG_INFO(QStringLiteral("ControlClient: disconnected from host"));
     m_joined = false;
     m_buffer.clear();
+    m_pingTimer->stop();
     emit disconnected();
 }
 
@@ -203,4 +224,24 @@ void ControlClient::sendScreenShareState(bool sharing)
     if (written < 0) {
         LOG_WARN(QStringLiteral("ControlClient: failed to send SCREEN state - %1").arg(m_socket->errorString()));
     }
+}
+
+void ControlClient::onPingTimer()
+{
+    if (!m_socket || m_socket->state() != QAbstractSocket::ConnectedState) {
+        return;
+    }
+
+    if (m_elapsed.isValid()) {
+        const qint64 now = m_elapsed.elapsed();
+        if (m_lastPongMs > 0 && now - m_lastPongMs > 15000) {
+            LOG_WARN(QStringLiteral("ControlClient: heartbeat timeout age=%1ms, closing socket")
+                         .arg(now - m_lastPongMs));
+            m_socket->disconnectFromHost();
+            return;
+        }
+    }
+
+    m_socket->write("PING\n");
+    m_socket->flush();
 }

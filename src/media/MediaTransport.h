@@ -6,6 +6,8 @@
 #include <QTimer>
 #include <QString>
 #include <QLabel>
+#include <QElapsedTimer>
+#include <QSize>
 
 #ifdef USE_FFMPEG_H264
 #include "media/VideoEncoder.h"
@@ -27,6 +29,7 @@ public:
     // endpoint without receiving remote video on this transport instance.
     bool startSendOnly(const QString &remoteIp, quint16 remotePort);
     void stopTransport();
+    void logDiagnostics() const;
 
     QWidget *getRemoteVideoWidget();
 
@@ -43,6 +46,8 @@ private:
     QUdpSocket *udpSendSocket;
     QUdpSocket *udpRecvSocket;
     QTimer *sendTimer;
+    QElapsedTimer sendClock;
+    qint64 lastSendMs;
 
     QString remoteIp;
     quint16 localPort;
@@ -58,6 +63,9 @@ private:
     VideoDecoder *decoder;
     int videoWidth;
     int videoHeight;
+    QSize activeEncodeBound;
+    QSize fallbackEncodeBound;
+    bool fallbackActive;
 #endif
 };
 

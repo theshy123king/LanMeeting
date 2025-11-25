@@ -5,7 +5,6 @@
 #include <QImage>
 #include <QPixmap>
 #include <QVBoxLayout>
-#include <cstring>
 
 #ifdef USE_FFMPEG_H264
 extern "C" {
@@ -15,13 +14,52 @@ extern "C" {
 
 #include "MediaEngine.h"
 #include "common/Logger.h"
-#include "common/Config.h"
+
+namespace {
+constexpr double kTargetFrameIntervalMs = 1000.0 / 24.0;
+constexpr int kFrameIntervalCeilMs = 42; // rounding up 41.67 for QTimer.
+
+#ifdef USE_FFMPEG_H264
+QSize ensureEvenSize(const QSize &size)
+{
+    QSize even = size;
+    if (even.width() % 2 != 0) {
+        even.rwidth() -= 1;
+    }
+    if (even.height() % 2 != 0) {
+        even.rheight() -= 1;
+    }
+    if (even.width() <= 0 || even.height() <= 0) {
+        return QSize();
+    }
+    return even;
+}
+
+QSize calculateEncodeSize(const QSize &source, const QSize &bound)
+{
+    if (!source.isValid()) {
+        return ensureEvenSize(bound);
+    }
+
+    QSize scaled = source;
+    if (bound.isValid()) {
+        scaled = source.scaled(bound, Qt::KeepAspectRatio);
+    }
+
+    scaled.setWidth(qMin(scaled.width(), source.width()));
+    scaled.setHeight(qMin(scaled.height(), source.height()));
+    return ensureEvenSize(scaled);
+}
+#endif
+} // namespace
 
 MediaTransport::MediaTransport(MediaEngine *engine, QObject *parent)
     : QObject(parent)
     , udpSendSocket(new QUdpSocket(this))
     , udpRecvSocket(new QUdpSocket(this))
     , sendTimer(new QTimer(this))
+    , sendClock()
+    , lastSendMs(0)
     , remoteIp()
     , localPort(0)
     , remotePort(0)
@@ -33,11 +71,13 @@ MediaTransport::MediaTransport(MediaEngine *engine, QObject *parent)
     , decoder(nullptr)
     , videoWidth(0)
     , videoHeight(0)
+    , activeEncodeBound(960, 540)
+    , fallbackEncodeBound(720, 404)
+    , fallbackActive(false)
 #endif
 {
-    // Limit camera video frame rate a bit to reduce CPU
-    // and bandwidth usage, prioritising audio smoothness.
-    sendTimer->setInterval(Config::VIDEO_SEND_INTERVAL_MS);
+    // Enforce ~24 FPS pacing for outgoing video.
+    sendTimer->setInterval(kFrameIntervalCeilMs);
     connect(sendTimer, &QTimer::timeout, this, &MediaTransport::onSendTimer);
 
     remoteVideoLabel->setAlignment(Qt::AlignCenter);
@@ -63,6 +103,9 @@ bool MediaTransport::startTransport(quint16 localPortValue, const QString &remot
     localPort = localPortValue;
     remoteIp = remoteIpValue;
     remotePort = remotePortValue;
+    lastSendMs = 0;
+    sendClock.invalidate();
+    sendClock.start();
 
     if (!udpRecvSocket->bind(QHostAddress::AnyIPv4, localPort)) {
         LOG_WARN(QStringLiteral("MediaTransport: failed to bind UDP port %1: %2")
@@ -74,15 +117,13 @@ bool MediaTransport::startTransport(quint16 localPortValue, const QString &remot
     connect(udpRecvSocket, &QUdpSocket::readyRead, this, &MediaTransport::onReadyRead);
 
 #ifdef USE_FFMPEG_H264
+    fallbackActive = false;
     if (media) {
         const QImage frame = media->getCurrentFrame();
-        if (!frame.isNull()) {
-            videoWidth = frame.width();
-            videoHeight = frame.height();
-        } else {
-            videoWidth = 640;
-            videoHeight = 480;
-        }
+        const QSize sourceSize = frame.isNull() ? QSize(640, 480) : frame.size();
+        const QSize encodeSize = calculateEncodeSize(sourceSize, activeEncodeBound);
+        videoWidth = encodeSize.width();
+        videoHeight = encodeSize.height();
 
         if (!encoder) {
             encoder = new VideoEncoder();
@@ -125,17 +166,18 @@ bool MediaTransport::startSendOnly(const QString &remoteIpValue, quint16 remoteP
     localPort = 0;
     remoteIp = remoteIpValue;
     remotePort = remotePortValue;
+    lastSendMs = 0;
+    sendClock.invalidate();
+    sendClock.start();
 
 #ifdef USE_FFMPEG_H264
+    fallbackActive = false;
     if (media) {
         const QImage frame = media->getCurrentFrame();
-        if (!frame.isNull()) {
-            videoWidth = frame.width();
-            videoHeight = frame.height();
-        } else {
-            videoWidth = 640;
-            videoHeight = 480;
-        }
+        const QSize sourceSize = frame.isNull() ? QSize(640, 480) : frame.size();
+        const QSize encodeSize = calculateEncodeSize(sourceSize, activeEncodeBound);
+        videoWidth = encodeSize.width();
+        videoHeight = encodeSize.height();
 
         if (!encoder) {
             encoder = new VideoEncoder();
@@ -158,6 +200,8 @@ void MediaTransport::stopTransport()
     if (sendTimer->isActive()) {
         sendTimer->stop();
     }
+    lastSendMs = 0;
+    sendClock.invalidate();
 
     udpSendSocket->disconnect(this);
     if (udpRecvSocket->isOpen()) {
@@ -173,6 +217,8 @@ void MediaTransport::stopTransport()
     decoder = nullptr;
     videoWidth = 0;
     videoHeight = 0;
+    activeEncodeBound = QSize(960, 540);
+    fallbackActive = false;
 #endif
 
     // 重置端口与地址，避免下次启动时误用旧状态。
@@ -192,11 +238,40 @@ QWidget *MediaTransport::getRemoteVideoWidget()
     return remoteVideoWidget;
 }
 
+void MediaTransport::logDiagnostics() const
+{
+    LOG_INFO(QStringLiteral("VideoNet diag: localPort=%1 remote=%2:%3 recvOpen=%4 sendOpen=%5")
+                 .arg(localPort)
+                 .arg(remoteIp)
+                 .arg(remotePort)
+                 .arg(udpRecvSocket && udpRecvSocket->isOpen())
+                 .arg(udpSendSocket && udpSendSocket->isOpen()));
+}
+
 void MediaTransport::onSendTimer()
 {
     if (!media || remoteIp.isEmpty() || remotePort == 0) {
         return;
     }
+
+    if (!sendClock.isValid()) {
+        sendClock.start();
+    }
+
+    const qint64 nowMs = sendClock.elapsed();
+    const qint64 minIntervalMs = static_cast<qint64>(kTargetFrameIntervalMs);
+    const qint64 lateIntervalMs = static_cast<qint64>(kTargetFrameIntervalMs * 1.5);
+    if (lastSendMs > 0) {
+        const qint64 delta = nowMs - lastSendMs;
+        if (delta < minIntervalMs) {
+            return;
+        }
+        if (delta > lateIntervalMs) {
+            lastSendMs = nowMs;
+            return;
+        }
+    }
+    lastSendMs = nowMs;
 
     const QImage frame = media->getCurrentFrame();
     if (frame.isNull()) {
@@ -205,79 +280,25 @@ void MediaTransport::onSendTimer()
 
 #ifdef USE_FFMPEG_H264
     if (encoder && videoWidth > 0 && videoHeight > 0) {
-        QImage rgbFrame = frame.convertToFormat(QImage::Format_RGBA8888);
-        if (rgbFrame.isNull()) {
+        const QSize sourceSize = frame.size().isValid() ? frame.size() : QSize(videoWidth, videoHeight);
+        const QSize bound = fallbackActive ? fallbackEncodeBound : activeEncodeBound;
+        const QSize encodeSize = calculateEncodeSize(sourceSize, bound);
+        AVFrame *yuvFrame = nullptr;
+        if (!media->prepareFrameForEncode(encodeSize.width(), encodeSize.height(), AV_PIX_FMT_YUV420P, yuvFrame) || !yuvFrame) {
             return;
         }
 
-        AVFrame *srcFrame = av_frame_alloc();
-        if (!srcFrame) {
-            return;
+        if (yuvFrame->width != videoWidth || yuvFrame->height != videoHeight) {
+            videoWidth = yuvFrame->width;
+            videoHeight = yuvFrame->height;
+            encoder->reinit(videoWidth, videoHeight, AV_PIX_FMT_YUV420P);
         }
-
-        srcFrame->format = AV_PIX_FMT_RGBA;
-        srcFrame->width = videoWidth;
-        srcFrame->height = videoHeight;
-
-        if (av_frame_get_buffer(srcFrame, 32) < 0) {
-            av_frame_free(&srcFrame);
-            return;
-        }
-
-        for (int y = 0; y < videoHeight; ++y) {
-            uint8_t *dstLine = srcFrame->data[0] + y * srcFrame->linesize[0];
-            const uint8_t *srcLine = rgbFrame.constScanLine(y);
-            std::memcpy(dstLine, srcLine, size_t(videoWidth) * 4);
-        }
-
-        AVFrame *yuvFrame = av_frame_alloc();
-        if (!yuvFrame) {
-            av_frame_free(&srcFrame);
-            return;
-        }
-
-        yuvFrame->format = AV_PIX_FMT_YUV420P;
-        yuvFrame->width = videoWidth;
-        yuvFrame->height = videoHeight;
-
-        if (av_frame_get_buffer(yuvFrame, 32) < 0) {
-            av_frame_free(&srcFrame);
-            av_frame_free(&yuvFrame);
-            return;
-        }
-
-        SwsContext *swsCtx = sws_getContext(videoWidth,
-                                            videoHeight,
-                                            AV_PIX_FMT_RGBA,
-                                            videoWidth,
-                                            videoHeight,
-                                            AV_PIX_FMT_YUV420P,
-                                            SWS_BILINEAR,
-                                            nullptr,
-                                            nullptr,
-                                            nullptr);
-        if (!swsCtx) {
-            av_frame_free(&srcFrame);
-            av_frame_free(&yuvFrame);
-            return;
-        }
-
-        const uint8_t *srcSlice[4] = { srcFrame->data[0], nullptr, nullptr, nullptr };
-        int srcStride[4] = { srcFrame->linesize[0], 0, 0, 0 };
-
-        sws_scale(swsCtx,
-                  srcSlice,
-                  srcStride,
-                  0,
-                  videoHeight,
-                  yuvFrame->data,
-                  yuvFrame->linesize);
-
-        sws_freeContext(swsCtx);
-        av_frame_free(&srcFrame);
 
         QByteArray packet;
-        if (encoder->encodeFrame(yuvFrame, packet) && !packet.isEmpty()) {
+        const bool encoded = encoder->encodeFrame(yuvFrame, packet);
+        av_frame_free(&yuvFrame);
+
+        if (encoded && !packet.isEmpty()) {
             const qint64 written = udpSendSocket->writeDatagram(packet, QHostAddress(remoteIp), remotePort);
             if (written < 0) {
                 LOG_WARN(QStringLiteral("MediaTransport: failed to send H.264 packet to %1:%2 - %3")
@@ -289,7 +310,13 @@ void MediaTransport::onSendTimer()
             LOG_WARN(QStringLiteral("MediaTransport: encoder produced empty packet"));
         }
 
-        av_frame_free(&yuvFrame);
+        if (encoder->fallbackRequested()) {
+            fallbackActive = true;
+            encoder->clearFallbackRequest();
+            LOG_WARN(QStringLiteral("MediaTransport: switching to 720p fallback encode bound (%1x%2) after sustained load")
+                         .arg(fallbackEncodeBound.width())
+                         .arg(fallbackEncodeBound.height()));
+        }
 
         return;
     }
@@ -376,9 +403,21 @@ void MediaTransport::onReadyRead()
                     sws_freeContext(swsCtx);
 
                     if (!image.isNull()) {
-                        remoteVideoLabel->setPixmap(QPixmap::fromImage(image).scaled(remoteVideoLabel->size(),
-                                                                                     Qt::KeepAspectRatio,
-                                                                                     Qt::SmoothTransformation));
+                        const QSize target = remoteVideoLabel->size();
+                        const QSize native = image.size();
+                        QSize scaledSize = native;
+                        if (!target.isEmpty() && native.isValid()) {
+                            QSize fit = native.scaled(target, Qt::KeepAspectRatio);
+                            const double scaleFactor = qMin(1.0,
+                                                            qMin(double(fit.width()) / double(native.width()),
+                                                                 double(fit.height()) / double(native.height())));
+                            scaledSize = QSize(int(native.width() * scaleFactor),
+                                               int(native.height() * scaleFactor));
+                        }
+                        QPixmap pix = QPixmap::fromImage(image).scaled(scaledSize,
+                                                                       Qt::KeepAspectRatio,
+                                                                       Qt::SmoothTransformation);
+                        remoteVideoLabel->setPixmap(pix);
                         emit remoteFrameReceived();
                     } else {
                         LOG_WARN(QStringLiteral("MediaTransport: decoded frame produced null image"));
@@ -402,9 +441,21 @@ void MediaTransport::onReadyRead()
         }
 
         if (!image.isNull()) {
-            remoteVideoLabel->setPixmap(QPixmap::fromImage(image).scaled(remoteVideoLabel->size(),
-                                                                         Qt::KeepAspectRatio,
-                                                                         Qt::SmoothTransformation));
+            const QSize target = remoteVideoLabel->size();
+            const QSize native = image.size();
+            QSize scaledSize = native;
+            if (!target.isEmpty() && native.isValid()) {
+                QSize fit = native.scaled(target, Qt::KeepAspectRatio);
+                const double scaleFactor = qMin(1.0,
+                                                qMin(double(fit.width()) / double(native.width()),
+                                                     double(fit.height()) / double(native.height())));
+                scaledSize = QSize(int(native.width() * scaleFactor),
+                                   int(native.height() * scaleFactor));
+            }
+            QPixmap pix = QPixmap::fromImage(image).scaled(scaledSize,
+                                                           Qt::KeepAspectRatio,
+                                                           Qt::SmoothTransformation);
+            remoteVideoLabel->setPixmap(pix);
             emit remoteFrameReceived();
         }
     }

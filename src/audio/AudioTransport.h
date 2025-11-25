@@ -3,9 +3,14 @@
 
 #include <QObject>
 #include <QUdpSocket>
+#include <QQueue>
+#include <QMap>
+#include <QVector>
 #include <QTimer>
 #include <QString>
 #include <QThread>
+#include <QElapsedTimer>
+#include <cstdint>
 
 class AudioEngine;
 class AudioSendWorker;
@@ -13,6 +18,12 @@ class AudioSendWorker;
 class AudioTransport : public QObject
 {
     Q_OBJECT
+
+    struct JitterFrame
+    {
+        QByteArray pcm;
+        uint32_t seq;
+    };
 
 public:
     explicit AudioTransport(AudioEngine *engine, QObject *parent = nullptr);
@@ -24,10 +35,14 @@ public:
     bool startSendOnly(const QString &remoteIp, quint16 remotePort);
     void stopTransport();
     void setMuted(bool muted);
+    void logDiagnostics() const;
 
 private slots:
     void onReadyRead();
     void onSendTimer();
+    void onJitterTimer();
+
+    QByteArray generatePLC(const QByteArray &lastFrame) const;
 
 signals:
     // Emitted on the main/GUI thread whenever a new chunk
@@ -50,6 +65,21 @@ private:
     AudioEngine *audio;
     QTimer *sendTimer;
     bool muted;
+    QQueue<JitterFrame> m_jitterQueue;
+    uint32_t m_lastSeq = 0;
+    uint32_t m_sendSeq = 0;
+    uint32_t m_expectedSeq = 1;
+    QMap<uint32_t, QByteArray> m_reorderBuf;
+    int m_jitterMin = 2;
+    int m_jitterMax = 8;
+    int m_jitterTarget = 3;
+    QVector<qint64> m_interArrivalTimes;
+    QElapsedTimer m_arrivalTimer;
+    mutable QElapsedTimer m_diagTimer;
+    uint64_t m_plcCount = 0;
+    uint64_t m_lossEvents = 0;
+    QByteArray m_lastPcm;
+    QTimer *m_jitterTimer = nullptr;
 
     // Dedicated worker thread and helper object that own
     // the UDP send socket for audio frames.

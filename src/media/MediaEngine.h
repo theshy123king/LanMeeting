@@ -8,6 +8,14 @@
 #include <QVideoSink>
 #include <QVideoFrame>
 #include <QImage>
+#include <QSize>
+
+#ifdef USE_FFMPEG_H264
+extern "C" {
+#include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
+}
+#endif
 
 class MediaEngine : public QObject
 {
@@ -22,6 +30,10 @@ public:
 
     QImage convertFrame(const QVideoFrame &frame);
     QImage getCurrentFrame();
+
+#ifdef USE_FFMPEG_H264
+    bool prepareFrameForEncode(int targetWidth, int targetHeight, AVPixelFormat pixelFormat, AVFrame *&outFrame);
+#endif
 
 private:
     QCamera *camera;

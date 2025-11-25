@@ -9,6 +9,8 @@
 #include <QScreen>
 #include <QDataStream>
 #include <QDateTime>
+#include <algorithm>
+#include <QThread>
 
 #include "common/Logger.h"
 #include "common/Config.h"
@@ -40,8 +42,12 @@ public:
         , m_bytesSentInWindow(0)
         , m_windowStartMs(0)
         , m_maxBytesPerSecond(Config::SCREEN_SHARE_MAX_BYTES_PER_SEC)
+        , m_lastReportMs(0)
     {
     }
+
+signals:
+    void bandwidthSample(qint64 bytesPerSec);
 
 public slots:
     void sendFrame(const QByteArray &encodedFrame,
@@ -126,6 +132,12 @@ public slots:
                 }
 
                 m_bytesSentInWindow += written;
+                const qint64 elapsedMs =
+                    (m_windowStartMs > 0) ? (nowMs - m_windowStartMs) : 0;
+                if (elapsedMs >= 1000 && nowMs - m_lastReportMs >= 900) {
+                    m_lastReportMs = nowMs;
+                    emit bandwidthSample(m_bytesSentInWindow);
+                }
 
                 if (m_bytesSentInWindow >= m_maxBytesPerSecond) {
                     // Bandwidth budget exhausted in the middle of a frame;
@@ -141,6 +153,76 @@ private:
     qint64 m_bytesSentInWindow;
     qint64 m_windowStartMs;
     qint64 m_maxBytesPerSecond;
+    qint64 m_lastReportMs;
+};
+
+// Worker living in a dedicated thread to perform capture, scaling, and
+// JPEG encoding away from the ScreenShareTransport thread.
+class ScreenShareCaptureWorker : public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit ScreenShareCaptureWorker(ScreenShareTransport::CaptureSettings *settings,
+                                      QObject *parent = nullptr)
+        : QObject(parent)
+        , m_settings(settings)
+    {
+    }
+
+public slots:
+    void captureAndEncode()
+    {
+        if (!m_settings) {
+            return;
+        }
+
+        QScreen *screen = QGuiApplication::primaryScreen();
+        if (!screen) {
+            return;
+        }
+
+        const QPixmap pixmap = screen->grabWindow(0);
+        if (pixmap.isNull()) {
+            return;
+        }
+
+        QImage image = pixmap.toImage();
+        if (!m_settings->captureRect.isNull()) {
+            const QRect imageRect = QRect(QPoint(0, 0), image.size());
+            const QRect clipped = m_settings->captureRect.intersected(imageRect);
+            if (!clipped.isEmpty()) {
+                image = image.copy(clipped);
+            }
+        }
+
+        const QSize targetSize(m_settings->maxWidth, m_settings->maxHeight);
+        image = image.scaled(targetSize,
+                             Qt::KeepAspectRatio,
+                             Qt::SmoothTransformation);
+        if (image.isNull()) {
+            return;
+        }
+
+        QByteArray buffer;
+        QBuffer qBuffer(&buffer);
+        qBuffer.open(QIODevice::WriteOnly);
+        if (!image.save(&qBuffer, "JPG", m_settings->jpegQuality)) {
+            return;
+        }
+
+        if (buffer.isEmpty()) {
+            return;
+        }
+
+        emit frameReady(buffer, image.width(), image.height());
+    }
+
+signals:
+    void frameReady(const QByteArray &jpeg, int width, int height);
+
+private:
+    ScreenShareTransport::CaptureSettings *m_settings;
 };
 
 ScreenShareTransport::ScreenShareTransport(QObject *parent)
@@ -149,6 +231,8 @@ ScreenShareTransport::ScreenShareTransport(QObject *parent)
     , m_sendTimer(new QTimer(this))
     , m_sendThread()
     , m_senderWorker(new ScreenShareSenderWorker)
+    , m_captureThread(nullptr)
+    , m_captureWorker(nullptr)
     , m_remotePort(0)
     , m_sending(false)
     , m_receiving(false)
@@ -156,6 +240,7 @@ ScreenShareTransport::ScreenShareTransport(QObject *parent)
 {
     m_nextFrameId = 1;
     m_lastCleanupMs = 0;
+    applyQualityPreset();
 
     // Limit screen-share frame rate to a modest level so that CPU
     // and bandwidth usage remain bounded even when the desktop has
@@ -175,6 +260,11 @@ ScreenShareTransport::ScreenShareTransport(QObject *parent)
             &ScreenShareTransport::encodedFrameReady,
             m_senderWorker,
             &ScreenShareSenderWorker::sendFrame,
+            Qt::QueuedConnection);
+    connect(m_senderWorker,
+            &ScreenShareSenderWorker::bandwidthSample,
+            this,
+            &ScreenShareTransport::onBandwidthSample,
             Qt::QueuedConnection);
     m_sendThread.start(QThread::NormalPriority);
 }
@@ -221,6 +311,28 @@ bool ScreenShareTransport::startSender(quint16 remotePort)
     }
 
     m_remotePort = remotePort;
+    if (!m_captureThread) {
+        m_captureThread = new QThread(this);
+        m_captureThread->setObjectName(QStringLiteral("ScreenShareCaptureThread"));
+        m_captureWorker = new ScreenShareCaptureWorker(&m_captureSettings);
+        m_captureWorker->moveToThread(m_captureThread);
+        connect(this,
+                &ScreenShareTransport::requestCapture,
+                m_captureWorker,
+                &ScreenShareCaptureWorker::captureAndEncode,
+                Qt::QueuedConnection);
+        connect(m_captureWorker,
+                &ScreenShareCaptureWorker::frameReady,
+                this,
+                &ScreenShareTransport::onFrameReady,
+                Qt::QueuedConnection);
+        connect(m_captureThread,
+                &QThread::finished,
+                m_captureWorker,
+                &QObject::deleteLater);
+        m_captureThread->start(QThread::HighPriority);
+    }
+    m_lastFrameSentMs = 0;
     m_sending = true;
     m_sendTimer->start();
     return true;
@@ -231,6 +343,17 @@ void ScreenShareTransport::stopSender()
     if (m_sendTimer->isActive()) {
         m_sendTimer->stop();
     }
+    if (m_captureThread) {
+        m_captureThread->quit();
+        m_captureThread->wait();
+        if (m_captureWorker) {
+            delete m_captureWorker;
+            m_captureWorker = nullptr;
+        }
+        m_captureThread->deleteLater();
+        m_captureThread = nullptr;
+    }
+    m_lastFrameSentMs = 0;
     m_sending = false;
 }
 
@@ -280,59 +403,126 @@ void ScreenShareTransport::setRenderFitToWindow(bool fit)
     m_renderFitToWindow = fit;
 }
 
+void ScreenShareTransport::applyQualityPreset()
+{
+    switch (m_qualityLevel) {
+    case 0:
+        m_currentTargetFps = 2;
+        m_currentMaxWidth = 800;
+        m_currentMaxHeight = 450;
+        m_currentJpegQuality = 30;
+        break;
+    case 1:
+        m_currentTargetFps = std::max(1, std::min(4, Config::SCREEN_SHARE_FPS));
+        m_currentMaxWidth = 1024;
+        m_currentMaxHeight = 576;
+        m_currentJpegQuality = 40;
+        break;
+    case 2:
+    default:
+        m_currentTargetFps = std::max(1, Config::SCREEN_SHARE_FPS);
+        m_currentMaxWidth = Config::SCREEN_SHARE_MAX_WIDTH;
+        m_currentMaxHeight = Config::SCREEN_SHARE_MAX_HEIGHT;
+        m_currentJpegQuality = Config::SCREEN_SHARE_JPEG_QUALITY;
+        break;
+    }
+}
+
+void ScreenShareTransport::onBandwidthSample(qint64 bytesPerSec)
+{
+    const qint64 cap = Config::SCREEN_SHARE_MAX_BYTES_PER_SEC;
+    if (cap <= 0) {
+        return;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    m_sendHistory.append(bytesPerSec);
+    if (m_sendHistory.size() > 5) {
+        m_sendHistory.remove(0);
+    }
+
+    if (m_lastAdjustMs != 0 && nowMs - m_lastAdjustMs < 900) {
+        return;
+    }
+    m_lastAdjustMs = nowMs;
+
+    const qint64 recent = m_sendHistory.isEmpty() ? 0 : m_sendHistory.back();
+    const double ratio = double(recent) / double(cap);
+
+    int newLevel = m_qualityLevel;
+    if (ratio > 0.9 && newLevel > 0) {
+        --newLevel;
+    } else if (ratio < 0.5 && newLevel < 2) {
+        ++newLevel;
+    }
+
+    if (newLevel != m_qualityLevel) {
+        m_qualityLevel = newLevel;
+        applyQualityPreset();
+    }
+    m_lastBandwidthSample = recent;
+    LOG_INFO(QStringLiteral("ScreenShare diag: level=%1 fps=%2 cap=%3x%4 jpegQ=%5 bytes=%6 util=%.2f")
+                 .arg(m_qualityLevel)
+                 .arg(m_currentTargetFps)
+                 .arg(m_currentMaxWidth)
+                 .arg(m_currentMaxHeight)
+                 .arg(m_currentJpegQuality)
+                 .arg(static_cast<qlonglong>(recent))
+                 .arg(ratio));
+}
+
+void ScreenShareTransport::logDiagnostics() const
+{
+    LOG_INFO(QStringLiteral("ScreenShare diag tick: level=%1 fps=%2 cap=%3x%4 jpegQ=%5 lastBytes=%6")
+                 .arg(m_qualityLevel)
+                 .arg(m_currentTargetFps)
+                 .arg(m_currentMaxWidth)
+                 .arg(m_currentMaxHeight)
+                 .arg(m_currentJpegQuality)
+                 .arg(static_cast<qlonglong>(m_lastBandwidthSample)));
+}
+
+void ScreenShareTransport::onFrameReady(const QByteArray &jpeg, int /*width*/, int /*height*/)
+{
+    if (!m_sending || m_destIps.isEmpty() || m_remotePort == 0) {
+        return;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const int fps = std::max(1, m_currentTargetFps);
+    const qint64 minIntervalMs = 1000 / fps;
+    if (m_lastFrameSentMs != 0 && nowMs - m_lastFrameSentMs < minIntervalMs) {
+        return;
+    }
+
+    if (jpeg.isEmpty()) {
+        return;
+    }
+
+    const quint32 frameId = m_nextFrameId++;
+
+    emit encodedFrameReady(jpeg, m_destIps, m_remotePort, frameId);
+    m_lastFrameSentMs = nowMs;
+}
+
 void ScreenShareTransport::onSendTimer()
 {
     if (!m_sending || m_destIps.isEmpty() || m_remotePort == 0) {
         return;
     }
 
-    QScreen *screen = QGuiApplication::primaryScreen();
-    if (!screen) {
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    const int fps = std::max(1, m_currentTargetFps);
+    const qint64 minIntervalMs = 1000 / fps;
+    if (m_lastFrameSentMs != 0 && nowMs - m_lastFrameSentMs < minIntervalMs) {
         return;
     }
 
-    const QPixmap pixmap = screen->grabWindow(0);
-    if (pixmap.isNull()) {
-        return;
-    }
-
-    QImage image = pixmap.toImage();
-    if (!m_captureRect.isNull()) {
-        // Map requested capture region to the grabbed image; the
-        // grabWindow(0) pixmap uses screen coordinates starting at 0,0.
-        const QRect imageRect = QRect(QPoint(0, 0), image.size());
-        const QRect clipped = m_captureRect.intersected(imageRect);
-        if (!clipped.isEmpty()) {
-            image = image.copy(clipped);
-        }
-    }
-
-    // Downscale to a reasonable size for LAN transport.
-    const QSize targetSize(Config::SCREEN_SHARE_MAX_WIDTH,
-                           Config::SCREEN_SHARE_MAX_HEIGHT);
-    image = image.scaled(targetSize,
-                         Qt::KeepAspectRatio,
-                         Qt::SmoothTransformation);
-    if (image.isNull()) {
-        return;
-    }
-
-    QByteArray buffer;
-    QBuffer qBuffer(&buffer);
-    qBuffer.open(QIODevice::WriteOnly);
-    if (!image.save(&qBuffer, "JPG", Config::SCREEN_SHARE_JPEG_QUALITY)) {
-        return;
-    }
-
-    if (buffer.isEmpty()) {
-        return;
-    }
-
-    const quint32 frameId = m_nextFrameId++;
-
-    // Offload fragmentation and UDP sending to the dedicated worker
-    // thread, which also enforces a simple bandwidth cap.
-    emit encodedFrameReady(buffer, m_destIps, m_remotePort, frameId);
+    m_captureSettings.maxWidth = m_currentMaxWidth;
+    m_captureSettings.maxHeight = m_currentMaxHeight;
+    m_captureSettings.jpegQuality = m_currentJpegQuality;
+    m_captureSettings.captureRect = m_captureRect;
+    emit requestCapture();
 }
 
 void ScreenShareTransport::onReadyRead()

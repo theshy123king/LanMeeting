@@ -4,6 +4,8 @@
 #include <QObject>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QElapsedTimer>
+#include <QTimer>
 
 #include "common/Config.h"
 
@@ -34,6 +36,9 @@ private slots:
 private:
     QTcpServer *m_server;
     QList<QTcpSocket *> m_clients;
+    QTimer *m_pingTimer;
+    QElapsedTimer m_elapsed;
+    qint64 m_lastPongMs;
 };
 
 #endif // CONTROLSERVER_H
