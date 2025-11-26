@@ -41,7 +41,7 @@ public:
         , m_socket(nullptr)
         , m_bytesSentInWindow(0)
         , m_windowStartMs(0)
-        , m_maxBytesPerSecond(Config::SCREEN_SHARE_MAX_BYTES_PER_SEC)
+        , m_maxBytesPerSecond(std::max<qint64>(1, Config::SCREEN_SHARE_MAX_BYTES_PER_SEC * 9 / 10))
         , m_lastReportMs(0)
     {
     }
@@ -204,6 +204,29 @@ public slots:
             return;
         }
 
+        QImage thumb = image.scaled(64, 64, Qt::KeepAspectRatio, Qt::FastTransformation)
+                           .convertToFormat(QImage::Format_RGB32);
+        double diffScore = 1.0;
+        if (!m_lastThumb.isNull() && m_lastThumb.size() == thumb.size()) {
+            const int pixels = thumb.width() * thumb.height();
+            if (pixels > 0) {
+                const uchar *cur = thumb.constBits();
+                const uchar *prev = m_lastThumb.constBits();
+                qint64 acc = 0;
+                const int totalBytes = pixels * 4;
+                for (int i = 0; i < totalBytes; i += 4) {
+                    acc += std::abs(int(cur[i]) - int(prev[i]));
+                    acc += std::abs(int(cur[i + 1]) - int(prev[i + 1]));
+                    acc += std::abs(int(cur[i + 2]) - int(prev[i + 2]));
+                }
+                const double maxAcc = double(pixels) * 3.0 * 255.0;
+                if (maxAcc > 0.0) {
+                    diffScore = acc / maxAcc;
+                }
+            }
+        }
+        m_lastThumb = thumb;
+
         QByteArray buffer;
         QBuffer qBuffer(&buffer);
         qBuffer.open(QIODevice::WriteOnly);
@@ -215,14 +238,15 @@ public slots:
             return;
         }
 
-        emit frameReady(buffer, image.width(), image.height());
+        emit frameReady(buffer, image.width(), image.height(), diffScore);
     }
 
 signals:
-    void frameReady(const QByteArray &jpeg, int width, int height);
+    void frameReady(const QByteArray &jpeg, int width, int height, double diffScore);
 
 private:
     ScreenShareTransport::CaptureSettings *m_settings;
+    QImage m_lastThumb;
 };
 
 ScreenShareTransport::ScreenShareTransport(QObject *parent)
@@ -266,7 +290,7 @@ ScreenShareTransport::ScreenShareTransport(QObject *parent)
             this,
             &ScreenShareTransport::onBandwidthSample,
             Qt::QueuedConnection);
-    m_sendThread.start(QThread::NormalPriority);
+    m_sendThread.start(QThread::LowPriority);
 }
 
 ScreenShareTransport::~ScreenShareTransport()
@@ -330,7 +354,7 @@ bool ScreenShareTransport::startSender(quint16 remotePort)
                 &QThread::finished,
                 m_captureWorker,
                 &QObject::deleteLater);
-        m_captureThread->start(QThread::HighPriority);
+        m_captureThread->start(QThread::LowPriority);
     }
     m_lastFrameSentMs = 0;
     m_sending = true;
@@ -407,12 +431,14 @@ void ScreenShareTransport::applyQualityPreset()
 {
     switch (m_qualityLevel) {
     case 0:
+        m_currentTierLabel = QStringLiteral("Low");
         m_currentTargetFps = 2;
         m_currentMaxWidth = 800;
         m_currentMaxHeight = 450;
         m_currentJpegQuality = 30;
         break;
     case 1:
+        m_currentTierLabel = QStringLiteral("Medium");
         m_currentTargetFps = std::max(1, std::min(4, Config::SCREEN_SHARE_FPS));
         m_currentMaxWidth = 1024;
         m_currentMaxHeight = 576;
@@ -420,11 +446,29 @@ void ScreenShareTransport::applyQualityPreset()
         break;
     case 2:
     default:
+        m_currentTierLabel = QStringLiteral("High");
         m_currentTargetFps = std::max(1, Config::SCREEN_SHARE_FPS);
         m_currentMaxWidth = Config::SCREEN_SHARE_MAX_WIDTH;
         m_currentMaxHeight = Config::SCREEN_SHARE_MAX_HEIGHT;
         m_currentJpegQuality = Config::SCREEN_SHARE_JPEG_QUALITY;
         break;
+    }
+
+    m_baseMaxWidth = m_currentMaxWidth;
+    m_baseMaxHeight = m_currentMaxHeight;
+    m_baseJpegQuality = m_currentJpegQuality;
+    updateStatusText(m_currentTierLabel);
+}
+
+void ScreenShareTransport::updateStatusText(const QString &tier, const QString &reason)
+{
+    QString text = QStringLiteral("Screen share: %1").arg(tier);
+    if (!reason.isEmpty()) {
+        text.append(QStringLiteral(" (%1)").arg(reason));
+    }
+    if (text != m_statusText) {
+        m_statusText = text;
+        emit statusTextChanged(text);
     }
 }
 
@@ -452,7 +496,7 @@ void ScreenShareTransport::onBandwidthSample(qint64 bytesPerSec)
     int newLevel = m_qualityLevel;
     if (ratio > 0.9 && newLevel > 0) {
         --newLevel;
-    } else if (ratio < 0.5 && newLevel < 2) {
+    } else if (ratio < 0.45 && newLevel < 2) {
         ++newLevel;
     }
 
@@ -460,10 +504,26 @@ void ScreenShareTransport::onBandwidthSample(qint64 bytesPerSec)
         m_qualityLevel = newLevel;
         applyQualityPreset();
     }
+
+    // Dynamic scaling within the current tier to keep headroom for audio/video.
+    const double pressure = std::clamp(ratio, 0.0, 1.0);
+    const double qualityScale = 1.0 - 0.2 * pressure;
+    const double sizeScale = 1.0 - 0.3 * pressure;
+    m_currentJpegQuality = std::max(20, int(double(m_baseJpegQuality) * qualityScale));
+    m_currentMaxWidth = std::max(640, int(double(m_baseMaxWidth) * sizeScale));
+    m_currentMaxHeight = std::max(360, int(double(m_baseMaxHeight) * sizeScale));
+
     m_lastBandwidthSample = recent;
-    LOG_INFO(QStringLiteral("ScreenShare diag: level=%1 fps=%2 cap=%3x%4 jpegQ=%5 bytes=%6 util=%.2f")
+    const QString reason = (ratio > 0.85)
+                               ? QStringLiteral("throttled for bandwidth")
+                               : QString();
+    updateStatusText(m_currentTierLabel, reason);
+
+    LOG_INFO(QStringLiteral("ScreenShare diag: level=%1 tier=%2 fps=%3 eff=%4 cap=%5x%6 jpegQ=%7 bytes=%8 util=%.2f")
                  .arg(m_qualityLevel)
+                 .arg(m_currentTierLabel)
                  .arg(m_currentTargetFps)
+                 .arg(m_effectiveFps)
                  .arg(m_currentMaxWidth)
                  .arg(m_currentMaxHeight)
                  .arg(m_currentJpegQuality)
@@ -482,15 +542,35 @@ void ScreenShareTransport::logDiagnostics() const
                  .arg(static_cast<qlonglong>(m_lastBandwidthSample)));
 }
 
-void ScreenShareTransport::onFrameReady(const QByteArray &jpeg, int /*width*/, int /*height*/)
+void ScreenShareTransport::onFrameReady(const QByteArray &jpeg, int /*width*/, int /*height*/, double diffScore)
 {
     if (!m_sending || m_destIps.isEmpty() || m_remotePort == 0) {
         return;
     }
 
+    m_lastDiffScore = std::clamp(diffScore, 0.0, 1.0);
+
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
-    const int fps = std::max(1, m_currentTargetFps);
-    const qint64 minIntervalMs = 1000 / fps;
+    const int baseFps = std::max(1, m_currentTargetFps);
+    int adaptiveFps = baseFps;
+    if (m_lastDiffScore < 0.02) {
+        adaptiveFps = std::max(1, baseFps / 3);
+    } else if (m_lastDiffScore < 0.08) {
+        adaptiveFps = std::max(1, baseFps / 2);
+    }
+
+    const qint64 cap = Config::SCREEN_SHARE_MAX_BYTES_PER_SEC;
+    QString reason;
+    if (cap > 0 && m_lastBandwidthSample > 0) {
+        const double ratio = double(m_lastBandwidthSample) / double(cap);
+        if (ratio > 0.9) {
+            adaptiveFps = std::max(1, adaptiveFps / 2);
+            reason = QStringLiteral("bandwidth guard fps %1").arg(adaptiveFps);
+        }
+    }
+
+    m_effectiveFps = adaptiveFps;
+    const qint64 minIntervalMs = 1000 / adaptiveFps;
     if (m_lastFrameSentMs != 0 && nowMs - m_lastFrameSentMs < minIntervalMs) {
         return;
     }
@@ -500,6 +580,11 @@ void ScreenShareTransport::onFrameReady(const QByteArray &jpeg, int /*width*/, i
     }
 
     const quint32 frameId = m_nextFrameId++;
+
+    if (reason.isEmpty() && adaptiveFps < baseFps) {
+        reason = QStringLiteral("low motion fps %1").arg(adaptiveFps);
+    }
+    updateStatusText(m_currentTierLabel, reason);
 
     emit encodedFrameReady(jpeg, m_destIps, m_remotePort, frameId);
     m_lastFrameSentMs = nowMs;
@@ -516,6 +601,16 @@ void ScreenShareTransport::onSendTimer()
     const qint64 minIntervalMs = 1000 / fps;
     if (m_lastFrameSentMs != 0 && nowMs - m_lastFrameSentMs < minIntervalMs) {
         return;
+    }
+
+    const qint64 cap = Config::SCREEN_SHARE_MAX_BYTES_PER_SEC;
+    if (cap > 0 && m_lastBandwidthSample > 0) {
+        const double ratio = double(m_lastBandwidthSample) / double(cap);
+        if (ratio > 0.95) {
+            updateStatusText(m_currentTierLabel, QStringLiteral("paused for bandwidth headroom"));
+            m_lastFrameSentMs = nowMs;
+            return;
+        }
     }
 
     m_captureSettings.maxWidth = m_currentMaxWidth;

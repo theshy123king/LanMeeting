@@ -208,6 +208,20 @@ MainWindow::MainWindow(QWidget *parent)
             &ScreenShareTransport::screenFrameReceived,
             this,
             &MainWindow::onScreenShareFrameReceived);
+    connect(screenShare,
+            &ScreenShareTransport::statusTextChanged,
+            this,
+            [this](const QString &text) {
+                if (statusBar()) {
+                    statusBar()->showMessage(text, 2000);
+                }
+                if (ui->screenShareLabel) {
+                    ui->screenShareLabel->setText(text);
+                }
+                if (screenShareOverlayLabel) {
+                    screenShareOverlayLabel->setToolTip(text);
+                }
+            });
 
     // Guest 侧音视频 / 屏幕共享超时与自动重连相关定时器
     guestReconnectTimer = new QTimer(this);

@@ -80,15 +80,18 @@ signals:
                            quint16 remotePort,
                            quint32 frameId);
     void requestCapture();
+    void statusTextChanged(const QString &text);
 
 private slots:
     void onSendTimer();
     void onReadyRead();
     void onBandwidthSample(qint64 bytesPerSec);
     void applyQualityPreset();
-    void onFrameReady(const QByteArray &jpeg, int width, int height);
+    void onFrameReady(const QByteArray &jpeg, int width, int height, double diffScore);
 
 private:
+    void updateStatusText(const QString &tier, const QString &reason = QString());
+
     QUdpSocket *m_socket;
     QTimer *m_sendTimer;
 
@@ -128,7 +131,14 @@ private:
     int m_currentMaxWidth = 0;
     int m_currentMaxHeight = 0;
     int m_currentJpegQuality = 0;
+    int m_baseMaxWidth = 0;
+    int m_baseMaxHeight = 0;
+    int m_baseJpegQuality = 0;
     qint64 m_lastFrameSentMs = 0;
+    double m_lastDiffScore = 1.0;
+    QString m_currentTierLabel;
+    QString m_statusText;
+    int m_effectiveFps = 0;
     CaptureSettings m_captureSettings;
 };
 
