@@ -12,6 +12,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_CXX_COMPILER_ABI_FILE "${PROJECT_SOURCE_DIR}/cmake/CMakeCXXCompilerABI.cpp")
+# Simplify predefines generation to avoid toolchain path issues.
+set(CMAKE_CXX_COMPILER_PREDEFINES_COMMAND cmd.exe /c echo)
 
 # Optional FFmpeg root (for H.264 support)
 set(FFMPEG_ROOT "D:/dev/ffmpeg" CACHE PATH "Root directory of FFmpeg installation")
