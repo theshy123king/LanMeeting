@@ -23,11 +23,17 @@ QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
 QPushButton:hover, QToolButton:hover {
     background: #F2F2F7;
     border-color: #C7C7CC;
+    color: #0F0F10;
 }
 
 QPushButton:pressed, QToolButton:pressed {
     background: #D1D1D6;
     border-color: #AFAFB4;
+    color: #0F0F10;
+}
+
+QPushButton:disabled, QToolButton:disabled {
+    color: rgba(15, 15, 16, 0.35);
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
