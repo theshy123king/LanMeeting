@@ -1,57 +1,74 @@
-/* macOS-inspired layered light theme */
-
+/* macOS-inspired light + soft blue background */
 QWidget {
-    background: #EDEDED;
+    background: #F2F8FF;   /* Soft blue */
     color: #0F0F10;
     selection-background-color: rgba(0, 122, 255, 0.18);
 }
 
+/* Cards / panels */
 QFrame, QListWidget, QPlainTextEdit, QTextEdit, QTabWidget::pane {
     background: #FFFFFF;
-    border: 1px solid #D1D1D6;
+    border: 1px solid #B5D4FF;   /* Bluish border */
     border-radius: 12px;
 }
 
+/* -------------------------
+   Deep-Blue Buttons (explicit UI buttons)
+   ------------------------- */
 QPushButton,
 QPushButton:disabled,
 QPushButton:checked,
 QPushButton:hover,
-QPushButton:pressed {
+QPushButton:pressed,
+QToolButton,
+QToolButton:disabled,
+QToolButton:checked,
+QToolButton:hover,
+QToolButton:pressed {
     background: #007AFF;
+    color: #FFFFFF;
     border: none;
     border-radius: 8px;
-    padding: 6px 10px;
-    color: #FFFFFF;
+    padding: 6px 12px;
 }
 
-QPushButton:hover {
+QPushButton:hover,
+QToolButton:hover {
     background: #1A8CFF;
 }
 
-QPushButton:pressed {
+QPushButton:pressed,
+QToolButton:pressed {
     background: #0066CC;
 }
 
+/* Inputs */
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     background: #FFFFFF;
+    border: 1px solid #B5D4FF;
+    border-radius: 6px;
+    padding: 4px;
 }
 
+/* Status bar */
 QStatusBar {
     background: #FFFFFF;
-    border-top: 1px solid #D1D1D6;
+    border-top: 1px solid #B5D4FF;
 }
 
+/* Tooltip */
 QToolTip {
     background: #FFFFFF;
-    border: 1px solid #D1D1D6;
+    border: 1px solid #B5D4FF;
     border-radius: 8px;
     color: #0F0F10;
     padding: 6px;
 }
 
+/* Tabs */
 QTabBar::tab {
-    background: #E5E5EA;
-    border: 1px solid #D1D1D6;
+    background: #E8F3FF;                 /* Soft blue tab */
+    border: 1px solid #B5D4FF;
     border-bottom: none;
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
@@ -61,10 +78,11 @@ QTabBar::tab {
 
 QTabBar::tab:selected {
     background: #FFFFFF;
-    border-color: #C7C7CC;
+    border-color: #B5D4FF;
     color: #000000;
 }
 
+/* Scrollbars */
 QScrollBar:vertical, QScrollBar:horizontal {
     background: transparent;
     border: none;
@@ -78,8 +96,9 @@ QScrollBar::handle {
     border-radius: 5px;
 }
 
+/* Floating control bar */
 #floatingControlBar {
-    background: #F0F0F0;
-    border: 1px solid #C7C7CC;
+    background: #E4F2FF;     /* Slightly deeper soft-blue */
+    border: 1px solid #B5D4FF;
     border-radius: 12px;
 }
