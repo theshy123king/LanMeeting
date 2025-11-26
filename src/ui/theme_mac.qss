@@ -2,7 +2,7 @@
 
 QWidget {
     background: #EDEDED;
-    color: #1C1C1E;
+    color: #0F0F10;
     selection-background-color: rgba(0, 122, 255, 0.18);
 }
 
@@ -17,7 +17,7 @@ QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
     border: 1px solid #D1D1D6;
     border-radius: 10px;
     padding: 6px 10px;
-    color: #1C1C1E;
+    color: #0F0F10;
 }
 
 QPushButton:hover, QToolButton:hover {
@@ -43,7 +43,7 @@ QToolTip {
     background: #FFFFFF;
     border: 1px solid #D1D1D6;
     border-radius: 8px;
-    color: #1C1C1E;
+    color: #0F0F10;
     padding: 6px;
 }
 
@@ -54,7 +54,7 @@ QTabBar::tab {
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
     padding: 8px 14px;
-    color: #1C1C1E;
+    color: #0F0F10;
 }
 
 QTabBar::tab:selected {
