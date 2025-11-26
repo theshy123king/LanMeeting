@@ -13,24 +13,23 @@ QFrame, QListWidget, QPlainTextEdit, QTextEdit, QTabWidget::pane {
 }
 
 QPushButton,
-QPushButton:disabled {
+QPushButton:disabled,
+QPushButton:checked,
+QPushButton:hover,
+QPushButton:pressed {
     background: #007AFF;
-    border: 1px solid #005FD6;
+    border: none;
     border-radius: 8px;
     padding: 6px 10px;
     color: #FFFFFF;
 }
 
 QPushButton:hover {
-    background: #1A87FF;
-    border-color: #006BE6;
+    background: #1A8CFF;
 }
 
-QPushButton:pressed,
-QPushButton:checked {
-    background: #0066D6;
-    border-color: #004C9F;
-    color: #FFFFFF;
+QPushButton:pressed {
+    background: #0066CC;
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
@@ -80,7 +79,7 @@ QScrollBar::handle {
 }
 
 #floatingControlBar {
-    background: #D1D1D6;
+    background: #F0F0F0;
     border: 1px solid #C7C7CC;
     border-radius: 12px;
 }
