@@ -12,6 +12,8 @@
 #include <QThread>
 #include <QRect>
 #include <QVector>
+#include <QDir>
+#include <QFile>
 
 // Internal assembly state for a single screen-share frame on the receiver side.
 struct ScreenShareFrameAssembly
@@ -65,6 +67,12 @@ public:
     // render label on the client side.
     void setRenderFitToWindow(bool fit);
     void logDiagnostics() const;
+
+    // Optional host-side frame dumping (MJPEG-style JPG sequence or PNG sequence).
+    bool startFrameDump(const QString &dirPath, bool asPng = false);
+    void stopFrameDump();
+    bool isFrameDumping() const { return m_dumpFrames; }
+    QString frameDumpDirectory() const { return m_dumpDir; }
 
 signals:
     // Emitted on the client side whenever a new screen frame
@@ -140,6 +148,12 @@ private:
     QString m_statusText;
     int m_effectiveFps = 0;
     CaptureSettings m_captureSettings;
+
+    // Frame dump (host-side optional recorder)
+    bool m_dumpFrames = false;
+    QString m_dumpDir;
+    quint64 m_dumpIndex = 0;
+    bool m_dumpAsPng = false;
 };
 
 #endif // SCREENSHARETRANSPORT_H

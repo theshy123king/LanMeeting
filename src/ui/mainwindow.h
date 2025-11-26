@@ -10,6 +10,9 @@
 #include <QHash>
 #include <QSet>
 #include <QImage>
+#include <QFile>
+#include <QVector>
+#include <QDateTime>
 
 #include "common/Logger.h"
 #include "net/ControlServer.h"
@@ -69,6 +72,12 @@ public:
         bool isLocal = false;
     };
 
+    struct ChatLogEntry {
+        QDateTime timestamp;
+        QString sender;
+        QString message;
+    };
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -78,6 +87,7 @@ private slots:
     void on_btnJoinRoom_clicked();
     void on_btnLeaveRoom_clicked();
     void on_btnSendChat_clicked();
+    void on_btnExportChat_clicked();
 
 private:
     void initLayout();
@@ -88,6 +98,11 @@ private:
     void showControlBarTemporarily();
     void appendLogMessage(const QString &message);
     QString resolvedRoomIdFromInput() const;
+    void startAudioRecording();
+    void stopAudioRecording();
+    void startScreenDumpRecording(bool asPng = false);
+    void stopScreenDumpRecording();
+    void exportChatLog();
     void resetMeetingState();
     void startClientMediaTransports();
     void updateControlsForMeetingState();
@@ -150,6 +165,8 @@ private:
     QToolButton *btnMute;
     QToolButton *btnCamera;
     QToolButton *btnScreenShare;
+    QToolButton *btnRecordAudio;
+    QToolButton *btnRecordScreen;
     QTimer *controlBarHideTimer;
     QWidget *controlsContainer;
     QTimer *screenShareHideTimer;
@@ -178,10 +195,18 @@ private:
     bool audioMuted;
     bool cameraEnabled;
     int connectedClientCount;
+    bool recordingAudio;
+    QFile *audioRecordFile;
+    qint64 audioRecordDataSize;
+    QString audioRecordPath;
+    bool recordingScreen;
+    QString screenRecordDir;
+    bool screenRecordAsPng;
     QMap<QString, ParticipantInfo> participantInfos;
     QStringList participantOrder;
     QImage lastScreenShareFrame;
     QString activeSpeakerIp;
+    QVector<ChatLogEntry> chatLog;
 
       // Guest 侧简单自动重连
       QTimer *guestReconnectTimer;
@@ -189,12 +214,12 @@ private:
       bool guestManualLeave;
 
       // Layout helpers
-      void rebuildRemoteParticipantGrid();
-      QWidget *createParticipantVideoTile(const QString &displayName,
-                                          QLabel **outVideoLabel,
-                                          QLabel **outMicIconLabel,
-                                          QLabel **outCameraIconLabel);
-      void updateLocalMediaStateIcons();
-  };
+    void rebuildRemoteParticipantGrid();
+    QWidget *createParticipantVideoTile(const QString &displayName,
+                                        QLabel **outVideoLabel,
+                                        QLabel **outMicIconLabel,
+                                        QLabel **outCameraIconLabel);
+    void updateLocalMediaStateIcons();
+};
 
 #endif // MAINWINDOW_H

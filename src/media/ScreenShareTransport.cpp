@@ -11,6 +11,8 @@
 #include <QDateTime>
 #include <algorithm>
 #include <QThread>
+#include <QFile>
+#include <QDir>
 
 #include "common/Logger.h"
 #include "common/Config.h"
@@ -367,6 +369,7 @@ void ScreenShareTransport::stopSender()
     if (m_sendTimer->isActive()) {
         m_sendTimer->stop();
     }
+    stopFrameDump();
     if (m_captureThread) {
         m_captureThread->quit();
         m_captureThread->wait();
@@ -425,6 +428,36 @@ void ScreenShareTransport::setRenderLabel(QLabel *label)
 void ScreenShareTransport::setRenderFitToWindow(bool fit)
 {
     m_renderFitToWindow = fit;
+}
+
+bool ScreenShareTransport::startFrameDump(const QString &dirPath, bool asPng)
+{
+    QDir dir(dirPath);
+    if (!dir.exists()) {
+        if (!dir.mkpath(QStringLiteral("."))) {
+            LOG_WARN(QStringLiteral("ScreenShareTransport: failed to create frame dump dir %1").arg(dirPath));
+            return false;
+        }
+    }
+    m_dumpFrames = true;
+    m_dumpDir = dir.absolutePath();
+    m_dumpIndex = 0;
+    m_dumpAsPng = asPng;
+    LOG_INFO(QStringLiteral("ScreenShareTransport: frame dump started at %1").arg(m_dumpDir));
+    updateStatusText(m_currentTierLabel, QStringLiteral("frame dump on"));
+    return true;
+}
+
+void ScreenShareTransport::stopFrameDump()
+{
+    if (!m_dumpFrames) {
+        return;
+    }
+    LOG_INFO(QStringLiteral("ScreenShareTransport: frame dump stopped (%1 frames)").arg(m_dumpIndex));
+    m_dumpFrames = false;
+    m_dumpDir.clear();
+    m_dumpIndex = 0;
+    updateStatusText(m_currentTierLabel);
 }
 
 void ScreenShareTransport::applyQualityPreset()
@@ -585,6 +618,23 @@ void ScreenShareTransport::onFrameReady(const QByteArray &jpeg, int /*width*/, i
         reason = QStringLiteral("low motion fps %1").arg(adaptiveFps);
     }
     updateStatusText(m_currentTierLabel, reason);
+
+    if (m_dumpFrames && !m_dumpDir.isEmpty()) {
+        const QString fileName =
+            QStringLiteral("%1/frame_%2.%3").arg(m_dumpDir).arg(m_dumpIndex++, 6, 10, QLatin1Char('0')).arg(m_dumpAsPng ? QStringLiteral("png") : QStringLiteral("jpg"));
+        if (m_dumpAsPng) {
+            QImage img = QImage::fromData(jpeg, "JPG");
+            if (!img.isNull()) {
+                img.save(fileName, "PNG");
+            }
+        } else {
+            QFile f(fileName);
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write(jpeg);
+                f.close();
+            }
+        }
+    }
 
     emit encodedFrameReady(jpeg, m_destIps, m_remotePort, frameId);
     m_lastFrameSentMs = nowMs;

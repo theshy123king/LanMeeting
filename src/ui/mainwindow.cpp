@@ -23,6 +23,12 @@
 #include <QHostAddress>
 #include <QStyle>
 #include <QVector>
+#include <QFileDialog>
+#include <QStandardPaths>
+#include <QDir>
+#include <QTextStream>
+#include <QDataStream>
+#include <QStringConverter>
 
 #include "common/Config.h"
 #include "ScreenShareWidget.h"
@@ -70,11 +76,17 @@ MainWindow::MainWindow(QWidget *parent)
     , meetingRole(MeetingRole::None)
     , meetingState(MeetingState::Idle)
     , currentRemoteIp()
+    , currentRoomId()
     , audioTransportActive(false)
     , videoTransportActive(false)
     , audioMuted(false)
     , cameraEnabled(true)
     , connectedClientCount(0)
+    , recordingAudio(false)
+    , audioRecordFile(nullptr)
+    , audioRecordDataSize(0)
+    , recordingScreen(false)
+    , screenRecordAsPng(false)
     , guestReconnectTimer(nullptr)
     , guestReconnectAttempts(0)
     , guestManualLeave(false)
@@ -328,6 +340,13 @@ void MainWindow::initLayout()
     if (ui->btnSendChat) {
         ui->btnSendChat->setText(QStringLiteral("Send"));
     }
+    if (ui->btnExportChat) {
+        ui->btnExportChat->setText(QStringLiteral("Export"));
+        connect(ui->btnExportChat,
+                &QAbstractButton::clicked,
+                this,
+                &MainWindow::on_btnExportChat_clicked);
+    }
       if (ui->labelParticipants) {
           ui->labelParticipants->setText(
               QStringLiteral("Participants (Room %1)").arg(currentRoomId));
@@ -490,7 +509,7 @@ void MainWindow::initFloatingControls()
           broadcastLocalMediaState();
       });
 
-      btnScreenShare = new QToolButton(controlsContainer);
+    btnScreenShare = new QToolButton(controlsContainer);
     btnScreenShare->setText(QStringLiteral("Share Screen"));
     btnScreenShare->setCheckable(true);
     controlsLayout->addWidget(btnScreenShare);
@@ -521,6 +540,38 @@ void MainWindow::initFloatingControls()
             screenShare->stopSender();
             statusBar()->showMessage(QStringLiteral("Screen sharing is OFF"), 3000);
             appendLogMessage(QStringLiteral("主持人关闭屏幕共享"));
+        }
+    });
+
+    btnRecordAudio = new QToolButton(controlsContainer);
+    btnRecordAudio->setText(QStringLiteral("Rec Audio"));
+    btnRecordAudio->setCheckable(true);
+    controlsLayout->addWidget(btnRecordAudio);
+    connect(btnRecordAudio, &QAbstractButton::toggled, this, [this](bool checked) {
+        if (meetingRole != MeetingRole::Host) {
+            btnRecordAudio->setChecked(false);
+            return;
+        }
+        if (checked) {
+            startAudioRecording();
+        } else {
+            stopAudioRecording();
+        }
+    });
+
+    btnRecordScreen = new QToolButton(controlsContainer);
+    btnRecordScreen->setText(QStringLiteral("Rec Screen"));
+    btnRecordScreen->setCheckable(true);
+    controlsLayout->addWidget(btnRecordScreen);
+    connect(btnRecordScreen, &QAbstractButton::toggled, this, [this](bool checked) {
+        if (meetingRole != MeetingRole::Host) {
+            btnRecordScreen->setChecked(false);
+            return;
+        }
+        if (checked) {
+            startScreenDumpRecording(false);
+        } else {
+            stopScreenDumpRecording();
         }
     });
 
@@ -748,8 +799,200 @@ QString MainWindow::resolvedRoomIdFromInput() const
     return roomId;
 }
 
+void MainWindow::startAudioRecording()
+{
+    if (meetingRole != MeetingRole::Host || meetingState != MeetingState::InMeeting) {
+        if (btnRecordAudio) {
+            btnRecordAudio->setChecked(false);
+        }
+        return;
+    }
+    if (recordingAudio) {
+        return;
+    }
+    QDir dir(QDir::currentPath() + QStringLiteral("/recordings"));
+    if (!dir.exists()) {
+        dir.mkpath(QStringLiteral("."));
+    }
+    const QString fileName =
+        QStringLiteral("meeting_audio_%1.wav")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    audioRecordPath = dir.filePath(fileName);
+
+    audioRecordFile = new QFile(audioRecordPath, this);
+    if (!audioRecordFile->open(QIODevice::WriteOnly)) {
+        appendLogMessage(QStringLiteral("无法开始录音，文件打开失败：%1").arg(audioRecordFile->errorString()));
+        audioRecordFile->deleteLater();
+        audioRecordFile = nullptr;
+        if (btnRecordAudio) {
+            btnRecordAudio->setChecked(false);
+        }
+        return;
+    }
+
+    audioRecordDataSize = 0;
+    // Reserve WAV header (44 bytes)
+    QByteArray header;
+    header.resize(44);
+    header.fill(0);
+    audioRecordFile->write(header);
+    recordingAudio = true;
+    statusBar()->showMessage(QStringLiteral("Audio recording started"), 3000);
+    appendLogMessage(QStringLiteral("开始会议录音：%1").arg(audioRecordPath));
+}
+
+void MainWindow::stopAudioRecording()
+{
+    if (!recordingAudio || !audioRecordFile) {
+        return;
+    }
+
+    // Finalize WAV header
+    const qint64 dataSize = audioRecordDataSize;
+    const qint64 fileSize = dataSize + 44 - 8; // chunk size excludes RIFF + size field
+    audioRecordFile->seek(0);
+
+    QDataStream out(audioRecordFile);
+    out.setByteOrder(QDataStream::LittleEndian);
+    out.writeRawData("RIFF", 4);
+    out << quint32(fileSize);
+    out.writeRawData("WAVE", 4);
+    out.writeRawData("fmt ", 4);
+    out << quint32(16);            // PCM header size
+    out << quint16(1);             // audio format PCM
+    out << quint16(1);             // channels
+    out << quint32(48000);         // sample rate
+    out << quint32(48000 * 2);     // byte rate (sampleRate * channels * bytesPerSample)
+    out << quint16(2);             // block align
+    out << quint16(16);            // bits per sample
+    out.writeRawData("data", 4);
+    out << quint32(dataSize);
+
+    audioRecordFile->flush();
+    audioRecordFile->close();
+    audioRecordFile->deleteLater();
+    audioRecordFile = nullptr;
+    recordingAudio = false;
+
+    if (btnRecordAudio) {
+        btnRecordAudio->setChecked(false);
+    }
+
+    statusBar()->showMessage(QStringLiteral("Audio recording saved"), 3000);
+    appendLogMessage(QStringLiteral("录音已保存：%1").arg(audioRecordPath));
+}
+
+void MainWindow::startScreenDumpRecording(bool asPng)
+{
+    if (!screenShare || meetingRole != MeetingRole::Host || meetingState != MeetingState::InMeeting) {
+        if (btnRecordScreen) {
+            btnRecordScreen->setChecked(false);
+        }
+        return;
+    }
+    if (recordingScreen) {
+        return;
+    }
+
+    QDir dir(QDir::currentPath() + QStringLiteral("/recordings"));
+    if (!dir.exists()) {
+        dir.mkpath(QStringLiteral("."));
+    }
+    const QString subdir =
+        QStringLiteral("screen_%1").arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    if (!dir.exists(subdir)) {
+        dir.mkdir(subdir);
+    }
+    if (!dir.cd(subdir)) {
+        appendLogMessage(QStringLiteral("无法进入屏幕录制目录"));
+        if (btnRecordScreen) {
+            btnRecordScreen->setChecked(false);
+        }
+        return;
+    }
+    const QString targetDir = dir.absolutePath();
+    if (!screenShare->startFrameDump(targetDir, asPng)) {
+        appendLogMessage(QStringLiteral("屏幕录制启动失败"));
+        if (btnRecordScreen) {
+            btnRecordScreen->setChecked(false);
+        }
+        return;
+    }
+
+    screenRecordDir = targetDir;
+    screenRecordAsPng = asPng;
+    recordingScreen = true;
+    statusBar()->showMessage(QStringLiteral("Screen recording started"), 3000);
+    appendLogMessage(QStringLiteral("开始屏幕录制，输出目录：%1").arg(screenRecordDir));
+}
+
+void MainWindow::stopScreenDumpRecording()
+{
+    if (!recordingScreen) {
+        return;
+    }
+    if (screenShare) {
+        screenShare->stopFrameDump();
+    }
+    recordingScreen = false;
+    if (btnRecordScreen) {
+        btnRecordScreen->setChecked(false);
+    }
+    statusBar()->showMessage(QStringLiteral("Screen recording stopped"), 3000);
+    appendLogMessage(QStringLiteral("屏幕录制已停止，输出目录：%1").arg(screenRecordDir));
+    screenRecordDir.clear();
+}
+
+void MainWindow::exportChatLog()
+{
+    if (chatLog.isEmpty()) {
+        QMessageBox::information(this,
+                                 QStringLiteral("Export chat"),
+                                 QStringLiteral("No chat messages to export."));
+        return;
+    }
+
+    const QString defaultDir =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString suggested =
+        QStringLiteral("%1/chat_%2.md")
+            .arg(defaultDir.isEmpty() ? QDir::currentPath() : defaultDir)
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+
+    const QString filePath =
+        QFileDialog::getSaveFileName(this,
+                                     QStringLiteral("Export chat log"),
+                                     suggested,
+                                     QStringLiteral("Markdown (*.md);;Text files (*.txt)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this,
+                             QStringLiteral("Export chat"),
+                             QStringLiteral("Failed to write file:\n%1").arg(file.errorString()));
+        return;
+    }
+
+    QTextStream stream(&file);
+    stream.setEncoding(QStringConverter::Utf8);
+    stream << "# Chat log\n\n";
+    for (const ChatLogEntry &entry : std::as_const(chatLog)) {
+        const QString ts = entry.timestamp.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss"));
+        stream << "- [" << ts << "] " << entry.sender << ": " << entry.message << "\n";
+    }
+    file.close();
+
+    statusBar()->showMessage(QStringLiteral("Chat exported"), 3000);
+    appendLogMessage(QStringLiteral("聊天记录已导出：%1").arg(filePath));
+}
+
   void MainWindow::resetMeetingState()
   {
+    stopAudioRecording();
+    stopScreenDumpRecording();
     if (audioNet && audioTransportActive) {
         appendLogMessage(QStringLiteral("停止音频传输"));
         audioNet->stopTransport();
@@ -771,6 +1014,7 @@ QString MainWindow::resolvedRoomIdFromInput() const
     meetingRole = MeetingRole::None;
     meetingState = MeetingState::Idle;
     currentRemoteIp.clear();
+    chatLog.clear();
 
     participantInfos.clear();
     participantOrder.clear();
@@ -1206,6 +1450,10 @@ void MainWindow::initHostVideoReceiver()
         }
 
           audio->playAudio(mixed);
+          if (recordingAudio && audioRecordFile && audioRecordFile->isOpen()) {
+              audioRecordFile->write(mixed);
+              audioRecordDataSize += mixed.size();
+          }
 
           // 选择当前能量最大的一个作为简单的“当前发言者”
           QString newActiveSpeaker;
@@ -1267,6 +1515,20 @@ void MainWindow::initHostVideoReceiver()
           btnScreenShare->setEnabled(canShare);
           if (!canShare) {
               btnScreenShare->setChecked(false);
+          }
+      }
+      if (btnRecordAudio) {
+          const bool canRecord = inMeeting && meetingRole == MeetingRole::Host;
+          btnRecordAudio->setEnabled(canRecord);
+          if (!canRecord && btnRecordAudio->isChecked()) {
+              btnRecordAudio->setChecked(false);
+          }
+      }
+      if (btnRecordScreen) {
+          const bool canRecord = inMeeting && meetingRole == MeetingRole::Host;
+          btnRecordScreen->setEnabled(canRecord);
+          if (!canRecord && btnRecordScreen->isChecked()) {
+              btnRecordScreen->setChecked(false);
           }
       }
 
@@ -1366,6 +1628,12 @@ void MainWindow::appendChatMessage(const QString &sender, const QString &message
     } else {
         appendLogMessage(QStringLiteral("收到聊天消息（%1）：%2").arg(sender, message));
     }
+
+    ChatLogEntry entry;
+    entry.timestamp = QDateTime::currentDateTime();
+    entry.sender = sender;
+    entry.message = message;
+    chatLog.append(entry);
 }
 
 void MainWindow::refreshParticipantListView()
@@ -1971,4 +2239,9 @@ void MainWindow::on_btnSendChat_clicked()
     } else if (meetingRole == MeetingRole::Guest && client) {
         client->sendChatMessage(text);
     }
+}
+
+void MainWindow::on_btnExportChat_clicked()
+{
+    exportChatLog();
 }
