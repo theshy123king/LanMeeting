@@ -12,39 +12,25 @@ QFrame, QListWidget, QPlainTextEdit, QTextEdit, QTabWidget::pane {
     border-radius: 12px;
 }
 
-QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
-    background: #E4F0FF;
-    border: 1px solid #A9C6E8;
-    border-radius: 10px;
-    padding: 6px 10px;
-    color: #1C1C1E;
-}
-
-QPushButton:hover, QToolButton:hover {
-    background: #EAF4FF;
-    border-color: #95B8E1;
-    color: #1C1C1E;
-}
-
-QPushButton:pressed, QToolButton:pressed {
-    background: #D5E8FF;
-    border-color: #80ABDB;
-    color: #1C1C1E;
-}
-
-QPushButton:checked, QToolButton:checked {
+QPushButton,
+QPushButton:disabled {
     background: #007AFF;
-    border-color: #005FD6;
+    border: 1px solid #005FD6;
+    border-radius: 8px;
+    padding: 6px 10px;
     color: #FFFFFF;
 }
 
-QPushButton:disabled,
-QPushButton[enabled="false"],
-QToolButton:disabled,
-QToolButton[enabled="false"] {
-    background: rgba(228, 240, 255, 0.4);
-    border: 1px solid rgba(169, 198, 232, 0.4);
-    color: #7A7A7A;
+QPushButton:hover {
+    background: #1A87FF;
+    border-color: #006BE6;
+}
+
+QPushButton:pressed,
+QPushButton:checked {
+    background: #0066D6;
+    border-color: #004C9F;
+    color: #FFFFFF;
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
