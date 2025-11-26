@@ -13,27 +13,33 @@ QFrame, QListWidget, QPlainTextEdit, QTextEdit, QTabWidget::pane {
 }
 
 QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
-    background: #E5E5EA;
-    border: 1px solid #D1D1D6;
+    background: #F7F7F9;
+    border: 1px solid #C7C7CC;
     border-radius: 10px;
     padding: 6px 10px;
-    color: #0F0F10;
+    color: #1C1C1E;
 }
 
 QPushButton:hover, QToolButton:hover {
-    background: #F2F2F7;
-    border-color: #C7C7CC;
-    color: #0F0F10;
+    background: #FFFFFF;
+    border-color: #B4B4B9;
+    color: #1C1C1E;
 }
 
 QPushButton:pressed, QToolButton:pressed {
-    background: #D1D1D6;
+    background: #E5E5EA;
     border-color: #AFAFB4;
-    color: #0F0F10;
+    color: #1C1C1E;
+}
+
+QPushButton:checked, QToolButton:checked {
+    background: #007AFF;
+    border-color: #005FD6;
+    color: #FFFFFF;
 }
 
 QPushButton:disabled, QToolButton:disabled {
-    color: rgba(15, 15, 16, 0.35);
+    color: rgba(28, 28, 30, 0.35);
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
@@ -84,6 +90,6 @@ QScrollBar::handle {
 
 #floatingControlBar {
     background: #D1D1D6;
-    border: 1px solid #AFAFB4;
+    border: 1px solid #C7C7CC;
     border-radius: 12px;
 }
