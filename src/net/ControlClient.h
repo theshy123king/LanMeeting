@@ -17,6 +17,8 @@ public:
 
     void connectToHost(const QString &ip, quint16 port = 5000);
     void disconnectFromHost();
+    void setRoomId(const QString &roomId);
+    QString roomId() const;
     void sendChatMessage(const QString &message);
     void sendMediaState(bool micMuted, bool cameraEnabled);
     void sendScreenShareState(bool sharing);
@@ -43,6 +45,7 @@ private:
     QTimer *m_pingTimer;
     QElapsedTimer m_elapsed;
     qint64 m_lastPongMs;
+    QString m_roomId;
 };
 
 #endif // CONTROLCLIENT_H

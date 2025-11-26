@@ -87,6 +87,7 @@ private:
     void updateOverlayGeometry();
     void showControlBarTemporarily();
     void appendLogMessage(const QString &message);
+    QString resolvedRoomIdFromInput() const;
     void resetMeetingState();
     void startClientMediaTransports();
     void updateControlsForMeetingState();
@@ -171,6 +172,7 @@ private:
     MeetingRole meetingRole;
     MeetingState meetingState;
     QString currentRemoteIp;
+    QString currentRoomId;
     bool audioTransportActive;
     bool videoTransportActive;
     bool audioMuted;

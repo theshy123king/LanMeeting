@@ -13,6 +13,8 @@ constexpr quint16 VIDEO_PORT_RECV   = 7001;
 constexpr quint16 SCREEN_PORT_SEND  = 7100;
 constexpr quint16 SCREEN_PORT_RECV  = 7101;
 
+constexpr const char *DEFAULT_ROOM_ID = "default";
+
 // Video sending interval (camera). Slightly reduced from 25 FPS
 // to ease CPU and bandwidth pressure while keeping motion smooth.
 constexpr int VIDEO_SEND_INTERVAL_MS = 66; // ~15 FPS

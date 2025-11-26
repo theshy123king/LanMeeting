@@ -1,6 +1,7 @@
 #include "ControlClient.h"
 
 #include "common/Logger.h"
+#include "common/Config.h"
 #include <QTimer>
 
 ControlClient::ControlClient(QObject *parent)
@@ -11,6 +12,7 @@ ControlClient::ControlClient(QObject *parent)
     , m_pingTimer(new QTimer(this))
     , m_elapsed()
     , m_lastPongMs(0)
+    , m_roomId(QString::fromUtf8(Config::DEFAULT_ROOM_ID))
 {
     connect(m_socket, &QTcpSocket::connected,
             this, &ControlClient::onConnected);
@@ -25,6 +27,17 @@ ControlClient::ControlClient(QObject *parent)
     connect(m_pingTimer, &QTimer::timeout, this, &ControlClient::onPingTimer);
 }
 
+void ControlClient::setRoomId(const QString &roomId)
+{
+    const QString trimmed = roomId.trimmed();
+    m_roomId = trimmed.isEmpty() ? QString::fromUtf8(Config::DEFAULT_ROOM_ID) : trimmed;
+}
+
+QString ControlClient::roomId() const
+{
+    return m_roomId.isEmpty() ? QString::fromUtf8(Config::DEFAULT_ROOM_ID) : m_roomId;
+}
+
 void ControlClient::connectToHost(const QString &ip, quint16 port)
 {
     if (m_socket->state() == QAbstractSocket::ConnectedState ||
@@ -37,8 +50,12 @@ void ControlClient::connectToHost(const QString &ip, quint16 port)
     m_joined = false;
     m_lastPongMs = 0;
     m_elapsed.invalidate();
+    setRoomId(m_roomId);
 
-    LOG_INFO(QStringLiteral("ControlClient connecting to %1:%2").arg(ip).arg(port));
+    LOG_INFO(QStringLiteral("ControlClient connecting to %1:%2 (room %3)")
+                 .arg(ip)
+                 .arg(port)
+                 .arg(roomId()));
     m_socket->connectToHost(ip, port);
 }
 
@@ -62,10 +79,13 @@ void ControlClient::disconnectFromHost()
 
 void ControlClient::onConnected()
 {
-    LOG_INFO(QStringLiteral("ControlClient connected, sending JOIN"));
+    LOG_INFO(QStringLiteral("ControlClient connected, sending JOIN (room %1)").arg(roomId()));
     m_elapsed.start();
     m_lastPongMs = m_elapsed.elapsed();
     m_pingTimer->start();
+    const QByteArray joinLine = QByteArrayLiteral("JOIN;room=") + roomId().toUtf8() + '\n';
+    m_socket->write(joinLine);
+    // Backward compatibility: also send legacy JOIN to work with older servers.
     m_socket->write("JOIN\n");
     m_socket->flush();
 }
@@ -129,6 +149,7 @@ void ControlClient::onReadyRead()
             bool micMuted = false;
             bool cameraEnabled = true;
             bool sharing = false;
+            QString messageRoomId = roomId();
 
             for (int i = 1; i < fields.size(); ++i) {
                 const QByteArray part = fields.at(i);
@@ -143,7 +164,16 @@ void ControlClient::onReadyRead()
                 } else if (part.startsWith(QByteArrayLiteral("on="))) {
                     const QByteArray v = part.mid(3).trimmed();
                     sharing = (v == "1");
+                } else if (part.startsWith(QByteArrayLiteral("room="))) {
+                    messageRoomId = QString::fromUtf8(part.mid(5)).trimmed();
                 }
+            }
+
+            if (messageRoomId.isEmpty()) {
+                messageRoomId = roomId();
+            }
+            if (messageRoomId != roomId()) {
+                continue;
             }
 
             if (kind == QByteArrayLiteral("MEDIA")) {
@@ -204,6 +234,8 @@ void ControlClient::sendMediaState(bool micMuted, bool cameraEnabled)
                             + (micMuted ? "1" : "0")
                             + QByteArrayLiteral(";cam=")
                             + (cameraEnabled ? "1" : "0")
+                            + QByteArrayLiteral(";room=")
+                            + roomId().toUtf8()
                             + '\n';
     const qint64 written = m_socket->write(line);
     if (written < 0) {
@@ -219,6 +251,8 @@ void ControlClient::sendScreenShareState(bool sharing)
 
     const QByteArray line = QByteArrayLiteral("SCREEN:on=")
                             + (sharing ? "1" : "0")
+                            + QByteArrayLiteral(";room=")
+                            + roomId().toUtf8()
                             + '\n';
     const qint64 written = m_socket->write(line);
     if (written < 0) {

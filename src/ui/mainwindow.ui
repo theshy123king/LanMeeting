@@ -194,11 +194,11 @@
           </item>
          </layout>
         </widget>
-         <widget class="QWidget" name="settingsTab">
-          <attribute name="title">
-           <string>Settings</string>
-          </attribute>
-          <layout class="QFormLayout" name="settingsLayout">
+       <widget class="QWidget" name="settingsTab">
+         <attribute name="title">
+          <string>Settings</string>
+         </attribute>
+         <layout class="QFormLayout" name="settingsLayout">
            <item row="0" column="0">
             <widget class="QLabel" name="labelSettings">
              <property name="text">
@@ -207,13 +207,30 @@
             </widget>
            </item>
            <item row="1" column="0">
+            <widget class="QLabel" name="labelRoomId">
+             <property name="text">
+              <string>Room ID</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QLineEdit" name="roomLineEdit">
+             <property name="placeholderText">
+              <string>default</string>
+             </property>
+             <property name="text">
+              <string>default</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="0">
             <widget class="QCheckBox" name="chkMuteOnJoin">
              <property name="text">
               <string>Mute on join</string>
              </property>
             </widget>
            </item>
-           <item row="2" column="0">
+           <item row="3" column="0">
             <widget class="QCheckBox" name="chkHideSelfView">
              <property name="text">
               <string>Hide self preview</string>

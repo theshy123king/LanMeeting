@@ -9,6 +9,7 @@ ControlServer::ControlServer(QObject *parent)
     , m_pingTimer(new QTimer(this))
     , m_elapsed()
     , m_lastPongMs(0)
+    , m_roomId(QString::fromUtf8(Config::DEFAULT_ROOM_ID))
 {
     connect(m_server, &QTcpServer::newConnection,
             this, &ControlServer::onNewConnection);
@@ -28,10 +29,27 @@ ControlServer::ControlServer(QObject *parent)
     m_pingTimer->start();
 }
 
+void ControlServer::setRoomId(const QString &roomId)
+{
+    m_roomId = normalizedRoomId(roomId);
+}
+
+QString ControlServer::roomId() const
+{
+    return normalizedRoomId(m_roomId);
+}
+
+QString ControlServer::defaultRoomId() const
+{
+    return QString::fromUtf8(Config::DEFAULT_ROOM_ID);
+}
+
 bool ControlServer::startServer(quint16 port)
 {
     if (m_server->isListening()) {
-        LOG_INFO(QStringLiteral("ControlServer already listening on port %1").arg(port));
+        LOG_INFO(QStringLiteral("ControlServer already listening on port %1 (default room %2)")
+                     .arg(port)
+                     .arg(roomId()));
         return true;
     }
 
@@ -41,7 +59,9 @@ bool ControlServer::startServer(quint16 port)
                       .arg(port)
                       .arg(m_server->errorString()));
     } else {
-        LOG_INFO(QStringLiteral("ControlServer listening on port %1").arg(port));
+        LOG_INFO(QStringLiteral("ControlServer listening on port %1 (default room %2)")
+                     .arg(port)
+                     .arg(roomId()));
     }
     return ok;
 }
@@ -57,6 +77,8 @@ void ControlServer::stopServer()
         socket->deleteLater();
     }
     m_clients.clear();
+    m_roomClients.clear();
+    m_clientRooms.clear();
 
     if (m_server->isListening()) {
         m_server->close();
@@ -64,16 +86,20 @@ void ControlServer::stopServer()
     }
 }
 
-void ControlServer::sendChatToAll(const QString &message)
+void ControlServer::sendChatToAll(const QString &message, const QString &roomId)
 {
-    if (m_clients.isEmpty()) {
-        LOG_WARN(QStringLiteral("ControlServer::sendChatToAll called with no connected clients"));
+    const QString targetRoom = normalizedRoomId(roomId.isEmpty() ? m_roomId : roomId);
+    const QList<QTcpSocket *> roomClients = clientsForRoom(targetRoom);
+
+    if (roomClients.isEmpty()) {
+        LOG_WARN(QStringLiteral("ControlServer::sendChatToAll called with no connected clients in room %1")
+                     .arg(targetRoom));
         return;
     }
 
     const QByteArray data = QByteArrayLiteral("CHAT:") + message.toUtf8() + '\n';
 
-    for (QTcpSocket *socket : std::as_const(m_clients)) {
+    for (QTcpSocket *socket : roomClients) {
         if (!socket)
             continue;
         if (socket->state() != QAbstractSocket::ConnectedState)
@@ -88,18 +114,24 @@ void ControlServer::sendChatToAll(const QString &message)
     }
 }
 
-void ControlServer::broadcastMediaState(const QString &ip, bool micMuted, bool cameraEnabled)
+void ControlServer::broadcastMediaState(const QString &ip,
+                                        bool micMuted,
+                                        bool cameraEnabled,
+                                        const QString &roomId)
 {
-    if (m_clients.isEmpty()) {
+    const QString targetRoom = normalizedRoomId(roomId.isEmpty() ? m_roomId : roomId);
+    const QList<QTcpSocket *> roomClients = clientsForRoom(targetRoom);
+    if (roomClients.isEmpty()) {
         return;
     }
 
-    const QByteArray line = QByteArrayLiteral("STATE:MEDIA;ip=") + ip.toUtf8()
+    const QByteArray line = QByteArrayLiteral("STATE:MEDIA;room=") + targetRoom.toUtf8()
+                            + QByteArrayLiteral(";ip=") + ip.toUtf8()
                             + QByteArrayLiteral(";mic=") + (micMuted ? "1" : "0")
                             + QByteArrayLiteral(";cam=") + (cameraEnabled ? "1" : "0")
                             + '\n';
 
-    for (QTcpSocket *socket : std::as_const(m_clients)) {
+    for (QTcpSocket *socket : roomClients) {
         if (!socket || socket->state() != QAbstractSocket::ConnectedState) {
             continue;
         }
@@ -107,21 +139,53 @@ void ControlServer::broadcastMediaState(const QString &ip, bool micMuted, bool c
     }
 }
 
-void ControlServer::broadcastScreenShareState(const QString &ip, bool sharing)
+void ControlServer::broadcastScreenShareState(const QString &ip, bool sharing, const QString &roomId)
 {
-    if (m_clients.isEmpty()) {
+    const QString targetRoom = normalizedRoomId(roomId.isEmpty() ? m_roomId : roomId);
+    const QList<QTcpSocket *> roomClients = clientsForRoom(targetRoom);
+    if (roomClients.isEmpty()) {
         return;
     }
 
-    const QByteArray line = QByteArrayLiteral("STATE:SCREEN;ip=") + ip.toUtf8()
+    const QByteArray line = QByteArrayLiteral("STATE:SCREEN;room=") + targetRoom.toUtf8()
+                            + QByteArrayLiteral(";ip=") + ip.toUtf8()
                             + QByteArrayLiteral(";on=") + (sharing ? "1" : "0")
                             + '\n';
 
-    for (QTcpSocket *socket : std::as_const(m_clients)) {
+    for (QTcpSocket *socket : roomClients) {
         if (!socket || socket->state() != QAbstractSocket::ConnectedState) {
             continue;
         }
         socket->write(line);
+    }
+}
+
+QString ControlServer::normalizedRoomId(const QString &roomId) const
+{
+    if (!roomId.trimmed().isEmpty()) {
+        return roomId.trimmed();
+    }
+    return QString::fromUtf8(Config::DEFAULT_ROOM_ID);
+}
+
+QList<QTcpSocket *> ControlServer::clientsForRoom(const QString &roomId) const
+{
+    return m_roomClients.value(normalizedRoomId(roomId));
+}
+
+void ControlServer::removeClientFromRoom(QTcpSocket *socket)
+{
+    const QString roomKey = m_clientRooms.take(socket);
+    if (roomKey.isEmpty()) {
+        return;
+    }
+
+    auto it = m_roomClients.find(roomKey);
+    if (it != m_roomClients.end()) {
+        it->removeAll(socket);
+        if (it->isEmpty()) {
+            m_roomClients.erase(it);
+        }
     }
 }
 
@@ -141,9 +205,11 @@ void ControlServer::onNewConnection()
                 this, &ControlServer::onReadyRead);
         connect(socket, &QTcpSocket::disconnected, this, [this, socket]() {
             const QString ip = socket->peerAddress().toString();
-            LOG_INFO(QStringLiteral("ControlServer: client disconnected from %1").arg(ip));
+            const QString roomId = m_clientRooms.value(socket, this->roomId());
+            LOG_INFO(QStringLiteral("ControlServer: client disconnected from %1 (room %2)").arg(ip, roomId));
             m_clients.removeAll(socket);
-            emit clientLeft(ip);
+            removeClientFromRoom(socket);
+            emit clientLeft(ip, roomId);
             socket->deleteLater();
         });
     }
@@ -168,14 +234,40 @@ void ControlServer::onReadyRead()
 
             const QString clientIp = socket->peerAddress().toString();
 
-            if (line == QByteArrayLiteral("JOIN")) {
+            if (line.startsWith(QByteArrayLiteral("JOIN"))) {
+                const QString previousRoom = m_clientRooms.value(socket);
+                const bool alreadyJoined = m_clientRooms.contains(socket);
+                QString requestedRoom = previousRoom;
+                if (line.contains(';')) {
+                    const QList<QByteArray> fields = line.split(';');
+                    for (const QByteArray &field : fields) {
+                        if (field.startsWith(QByteArrayLiteral("room="))) {
+                            requestedRoom = QString::fromUtf8(field.mid(5));
+                        }
+                    }
+                }
+                const QString roomId = normalizedRoomId(requestedRoom);
+                m_clientRooms.insert(socket, roomId);
+                auto &list = m_roomClients[roomId];
+                if (!list.contains(socket)) {
+                    list.append(socket);
+                }
+
                 socket->write("OK\n");
                 socket->flush();
 
-                LOG_INFO(QStringLiteral("ControlServer: JOIN confirmed for %1").arg(clientIp));
-                emit clientJoined(clientIp);
+                if (!alreadyJoined || previousRoom != roomId) {
+                    LOG_INFO(QStringLiteral("ControlServer: JOIN confirmed for %1 in room %2")
+                                 .arg(clientIp, roomId));
+                    emit clientJoined(clientIp, roomId);
+                } else {
+                    LOG_INFO(QStringLiteral("ControlServer: duplicate JOIN from %1 in room %2 ignored")
+                                 .arg(clientIp, roomId));
+                }
             } else if (line == QByteArrayLiteral("LEAVE")) {
-                LOG_INFO(QStringLiteral("ControlServer: LEAVE received from %1").arg(clientIp));
+                const QString roomId = m_clientRooms.value(socket, this->roomId());
+                LOG_INFO(QStringLiteral("ControlServer: LEAVE received from %1 (room %2)").arg(clientIp, roomId));
+                removeClientFromRoom(socket);
                 socket->disconnectFromHost();
             } else if (line == QByteArrayLiteral("PING")) {
                 socket->write("PONG\n");
@@ -186,12 +278,15 @@ void ControlServer::onReadyRead()
                 m_lastPongMs = m_elapsed.elapsed();
             } else if (line.startsWith(QByteArrayLiteral("CHAT:"))) {
                 const QString msg = QString::fromUtf8(line.mid(5));
-                LOG_INFO(QStringLiteral("ControlServer: chat from %1 - %2").arg(clientIp, msg));
-                emit chatReceived(clientIp, msg);
+                const QString roomId = m_clientRooms.value(socket, this->roomId());
+                LOG_INFO(QStringLiteral("ControlServer: chat from %1 (room %2) - %3")
+                             .arg(clientIp, roomId, msg));
+                emit chatReceived(clientIp, roomId, msg);
             } else if (line.startsWith(QByteArrayLiteral("MEDIA:"))) {
                 // Format: MEDIA:mic=0/1;cam=0/1
                 bool micMuted = false;
                 bool cameraEnabled = true;
+                QString roomId = m_clientRooms.value(socket);
 
                 const QList<QByteArray> parts = line.mid(6).split(';');
                 for (const QByteArray &part : parts) {
@@ -201,24 +296,47 @@ void ControlServer::onReadyRead()
                     } else if (part.startsWith(QByteArrayLiteral("cam="))) {
                         const QByteArray v = part.mid(4).trimmed();
                         cameraEnabled = (v != "0");
+                    } else if (part.startsWith(QByteArrayLiteral("room="))) {
+                        roomId = QString::fromUtf8(part.mid(5));
                     }
                 }
 
-                emit mediaStateChanged(clientIp, micMuted, cameraEnabled);
-                broadcastMediaState(clientIp, micMuted, cameraEnabled);
+                roomId = normalizedRoomId(roomId.isEmpty() ? m_clientRooms.value(socket) : roomId);
+                if (!roomId.isEmpty() && (!m_clientRooms.contains(socket) || m_clientRooms.value(socket) != roomId)) {
+                    m_clientRooms.insert(socket, roomId);
+                    auto &list = m_roomClients[roomId];
+                    if (!list.contains(socket)) {
+                        list.append(socket);
+                    }
+                }
+
+                emit mediaStateChanged(clientIp, roomId, micMuted, cameraEnabled);
+                broadcastMediaState(clientIp, micMuted, cameraEnabled, roomId);
             } else if (line.startsWith(QByteArrayLiteral("SCREEN:"))) {
                 // Format: SCREEN:on=0/1
                 bool sharing = false;
+                QString roomId = m_clientRooms.value(socket);
                 const QList<QByteArray> parts = line.mid(7).split(';');
                 for (const QByteArray &part : parts) {
                     if (part.startsWith(QByteArrayLiteral("on="))) {
                         const QByteArray v = part.mid(3).trimmed();
                         sharing = (v == "1");
+                    } else if (part.startsWith(QByteArrayLiteral("room="))) {
+                        roomId = QString::fromUtf8(part.mid(5));
                     }
                 }
 
-                emit screenShareStateChanged(clientIp, sharing);
-                broadcastScreenShareState(clientIp, sharing);
+                roomId = normalizedRoomId(roomId.isEmpty() ? m_clientRooms.value(socket) : roomId);
+                if (!roomId.isEmpty() && (!m_clientRooms.contains(socket) || m_clientRooms.value(socket) != roomId)) {
+                    m_clientRooms.insert(socket, roomId);
+                    auto &list = m_roomClients[roomId];
+                    if (!list.contains(socket)) {
+                        list.append(socket);
+                    }
+                }
+
+                emit screenShareStateChanged(clientIp, roomId, sharing);
+                broadcastScreenShareState(clientIp, sharing, roomId);
             }
         }
     }

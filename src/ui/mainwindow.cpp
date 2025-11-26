@@ -81,6 +81,17 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    if (ui->roomLineEdit && ui->roomLineEdit->text().trimmed().isEmpty()) {
+        ui->roomLineEdit->setText(QString::fromUtf8(Config::DEFAULT_ROOM_ID));
+    }
+    currentRoomId = resolvedRoomIdFromInput();
+    if (ui->roomLineEdit) {
+        connect(ui->roomLineEdit, &QLineEdit::textChanged, this, [this](const QString &) {
+            currentRoomId = resolvedRoomIdFromInput();
+            updateMeetingStatusLabel();
+        });
+    }
+
     initLayout();
     initSidePanel();
     initPreviewWindow();
@@ -304,7 +315,8 @@ void MainWindow::initLayout()
         ui->btnSendChat->setText(QStringLiteral("Send"));
     }
       if (ui->labelParticipants) {
-          ui->labelParticipants->setText(QStringLiteral("Participants"));
+          ui->labelParticipants->setText(
+              QStringLiteral("Participants (Room %1)").arg(currentRoomId));
       }
 
     if (ui->chatList) {
@@ -710,6 +722,18 @@ void MainWindow::appendLogMessage(const QString &message)
     }
 }
 
+QString MainWindow::resolvedRoomIdFromInput() const
+{
+    QString roomId;
+    if (ui && ui->roomLineEdit) {
+        roomId = ui->roomLineEdit->text().trimmed();
+    }
+    if (roomId.isEmpty()) {
+        roomId = QString::fromUtf8(Config::DEFAULT_ROOM_ID);
+    }
+    return roomId;
+}
+
   void MainWindow::resetMeetingState()
   {
     if (audioNet && audioTransportActive) {
@@ -788,6 +812,9 @@ void MainWindow::appendLogMessage(const QString &message)
       }
       screenShareOverlayLabel = nullptr;
     lastScreenShareFrame = QImage();
+
+    updateMeetingStatusLabel();
+    updateControlsForMeetingState();
 }
 
 void MainWindow::startClientMediaTransports()
@@ -1244,71 +1271,57 @@ void MainWindow::initHostVideoReceiver()
           }
       }
 
+    if (ui->roomLineEdit) {
+        ui->roomLineEdit->setEnabled(meetingState == MeetingState::Idle);
+    }
+
       updateLocalMediaStateIcons();
   }
 
 void MainWindow::updateMeetingStatusLabel()
-
 {
-
     if (!statusLabel) {
-
         return;
-
     }
 
-
+    const QString roomLabel = currentRoomId.isEmpty()
+                                   ? QString::fromUtf8(Config::DEFAULT_ROOM_ID)
+                                   : currentRoomId;
 
     const bool hasLocalParticipant = participantInfos.contains(localParticipantKey());
-
     connectedClientCount = qMax(0, participantInfos.size() - (hasLocalParticipant ? 1 : 0));
-
-
 
     QString statusText;
 
-
-
     switch (meetingState) {
-
     case MeetingState::Idle:
-
-        statusText = QStringLiteral("Not connected");
-
+        statusText = QStringLiteral("Room %1: Not connected").arg(roomLabel);
         break;
-
     case MeetingState::WaitingPeer: {
-
         const int participants = connectedClientCount + (hasLocalParticipant ? 1 : 0);
-
-        statusText = QStringLiteral("Meeting created, waiting for participants (currently %1)").arg(participants);
-
+        statusText = QStringLiteral("Room %1: Waiting for participants (currently %2)")
+                         .arg(roomLabel)
+                         .arg(participants);
         break;
-
     }
-
     case MeetingState::Connecting:
-
-        statusText = QStringLiteral("Joining meeting...");
-
+        statusText = QStringLiteral("Room %1: Joining meeting...").arg(roomLabel);
         break;
-
     case MeetingState::InMeeting: {
-
         const int participants = connectedClientCount + (hasLocalParticipant ? 1 : 0);
-
-        statusText = QStringLiteral("In meeting (%1 participants)").arg(participants);
-
+        statusText = QStringLiteral("Room %1: In meeting (%2 participants)")
+                         .arg(roomLabel)
+                         .arg(participants);
         break;
-
     }
-
     }
-
-
 
     statusLabel->setText(statusText);
     setWindowTitle(QStringLiteral("LAN Meeting - %1").arg(statusText));
+
+    if (ui->labelParticipants) {
+        ui->labelParticipants->setText(QStringLiteral("Participants (Room %1)").arg(roomLabel));
+    }
 }
 
 
@@ -1502,7 +1515,8 @@ void MainWindow::broadcastLocalMediaState()
     }
 
     if (meetingRole == MeetingRole::Host && server) {
-        server->broadcastMediaState(hostParticipantKey(), audioMuted, cameraEnabled);
+        server->setRoomId(currentRoomId);
+        server->broadcastMediaState(hostParticipantKey(), audioMuted, cameraEnabled, currentRoomId);
     } else if (meetingRole == MeetingRole::Guest && client) {
         client->sendMediaState(audioMuted, cameraEnabled);
     }
@@ -1588,7 +1602,12 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
 void MainWindow::on_btnCreateRoom_clicked()
 {
-    appendLogMessage(QStringLiteral("用户点击创建会议"));
+    currentRoomId = resolvedRoomIdFromInput();
+    appendLogMessage(QStringLiteral("用户点击创建会议（房间 %1）").arg(currentRoomId));
+
+    if (server) {
+        server->setRoomId(currentRoomId);
+    }
 
     if (meetingRole == MeetingRole::Guest) {
         QMessageBox::information(this,
@@ -1600,16 +1619,22 @@ void MainWindow::on_btnCreateRoom_clicked()
 
     if (!server) {
         server = new ControlServer(this);
+        server->setRoomId(currentRoomId);
 
-        connect(server, &ControlServer::clientJoined, this, [this](const QString &ip) {
-            appendLogMessage(QStringLiteral("控制连接收到客户端加入：%1").arg(ip));
+        connect(server, &ControlServer::clientJoined, this, [this](const QString &ip, const QString &roomId) {
+            if (roomId != currentRoomId) {
+                appendLogMessage(QStringLiteral("忽略来自其他房间的客户端加入：%1（房间 %2）").arg(ip, roomId));
+                return;
+            }
+
+            appendLogMessage(QStringLiteral("控制连接收到客户端加入：%1（房间 %2）").arg(ip, roomId));
 
             const QString displayName = QStringLiteral("Participant (%1)").arg(ip);
             upsertParticipant(ip, displayName, ip, false, true, false);
             activeClientIps.insert(ip);
 
             appendChatMessage(QStringLiteral("System"),
-                              QStringLiteral("%1 joined the meeting").arg(displayName),
+                              QStringLiteral("%1 joined the meeting (room %2)").arg(displayName, roomId),
                               false);
 
             if (audioNet && !audioNet->startSendOnly(ip, Config::AUDIO_PORT_RECV)) {
@@ -1648,18 +1673,23 @@ void MainWindow::on_btnCreateRoom_clicked()
             updateMeetingStatusLabel();
             updateControlsForMeetingState();
 
-            appendLogMessage(QStringLiteral("客户端 %1 已加入会议，音视频传输已启动").arg(ip));
+            appendLogMessage(QStringLiteral("客户端 %1 已加入会议，音视频传输已启动（房间 %2）").arg(ip, roomId));
         });
 
-        connect(server, &ControlServer::clientLeft, this, [this](const QString &ip) {
+        connect(server, &ControlServer::clientLeft, this, [this](const QString &ip, const QString &roomId) {
+            if (roomId != currentRoomId) {
+                appendLogMessage(QStringLiteral("忽略其他房间的离开事件：%1（房间 %2）").arg(ip, roomId));
+                return;
+            }
+
             const QString displayName = QStringLiteral("Participant (%1)").arg(ip);
-            appendLogMessage(QStringLiteral("服务器检测到客户端离开：%1").arg(ip));
+            appendLogMessage(QStringLiteral("服务器检测到客户端离开：%1（房间 %2）").arg(ip, roomId));
 
             removeParticipant(ip);
             activeClientIps.remove(ip);
 
             appendChatMessage(QStringLiteral("System"),
-                              QStringLiteral("%1 left the meeting").arg(displayName),
+                              QStringLiteral("%1 left the meeting (room %2)").arg(displayName, roomId),
                               false);
 
             // 停止当前音视频通道，保持会议继续处于“等待对端加入”状态
@@ -1677,7 +1707,11 @@ void MainWindow::on_btnCreateRoom_clicked()
             updateControlsForMeetingState();
         });
 
-        connect(server, &ControlServer::chatReceived, this, [this](const QString &ip, const QString &msg) {
+        connect(server, &ControlServer::chatReceived, this, [this](const QString &ip, const QString &roomId, const QString &msg) {
+            if (roomId != currentRoomId) {
+                appendLogMessage(QStringLiteral("忽略其他房间的聊天消息（%1）：%2").arg(roomId, msg));
+                return;
+            }
             Q_UNUSED(ip);
             appendChatMessage(QStringLiteral("Remote"), msg, false);
         });
@@ -1685,7 +1719,10 @@ void MainWindow::on_btnCreateRoom_clicked()
         connect(server,
                 &ControlServer::mediaStateChanged,
                 this,
-                [this](const QString &ip, bool micMuted, bool cameraEnabled) {
+                [this](const QString &ip, const QString &roomId, bool micMuted, bool cameraEnabled) {
+                    if (roomId != currentRoomId) {
+                        return;
+                    }
                     updateParticipantMediaStateByIp(ip, micMuted, cameraEnabled);
                 });
     }
@@ -1693,7 +1730,8 @@ void MainWindow::on_btnCreateRoom_clicked()
     if (server->startServer()) {
         QMessageBox::information(this,
                                  QStringLiteral("Host meeting"),
-                                 QStringLiteral("Meeting created. Waiting for participants..."));
+                                 QStringLiteral("Meeting created for room \"%1\". Waiting for participants...")
+                                     .arg(currentRoomId));
         meetingRole = MeetingRole::Host;
         meetingState = MeetingState::WaitingPeer;
 
@@ -1707,12 +1745,13 @@ void MainWindow::on_btnCreateRoom_clicked()
                           true);
 
         appendChatMessage(QStringLiteral("System"),
-                          QStringLiteral("You created a meeting and are waiting for participants."),
+                          QStringLiteral("You created room \"%1\" and are waiting for participants.")
+                              .arg(currentRoomId),
                           false);
 
         updateMeetingStatusLabel();
         updateControlsForMeetingState();
-        appendLogMessage(QStringLiteral("会议服务器已启动，等待客户端连接"));
+        appendLogMessage(QStringLiteral("会议服务器已启动，房间 %1，等待客户端连接").arg(currentRoomId));
         initHostVideoReceiver();
         initHostAudioMixer();
     } else {
@@ -1726,7 +1765,12 @@ void MainWindow::on_btnCreateRoom_clicked()
 
 void MainWindow::on_btnJoinRoom_clicked()
 {
-    appendLogMessage(QStringLiteral("用户点击加入会议"));
+    currentRoomId = resolvedRoomIdFromInput();
+    appendLogMessage(QStringLiteral("用户点击加入会议（房间 %1）").arg(currentRoomId));
+
+    if (client) {
+        client->setRoomId(currentRoomId);
+    }
 
     if (meetingRole == MeetingRole::Host) {
         QMessageBox::information(this,
@@ -1768,17 +1812,18 @@ void MainWindow::on_btnJoinRoom_clicked()
 
     if (!client) {
         client = new ControlClient(this);
+        client->setRoomId(currentRoomId);
 
         connect(client, &ControlClient::errorOccurred, this, [this](const QString &msg) {
             QMessageBox::critical(this,
                                   QStringLiteral("Join failed"),
                                   QStringLiteral("Control connection error:\n%1").arg(msg));
-            appendLogMessage(QStringLiteral("控制连接错误：%1").arg(msg));
+            appendLogMessage(QStringLiteral("控制连接错误（房间 %1）：%2").arg(currentRoomId, msg));
             resetMeetingState();
         });
 
         connect(client, &ControlClient::joined, this, [this]() {
-            statusBar()->showMessage(QStringLiteral("Successfully joined meeting."), 3000);
+            statusBar()->showMessage(QStringLiteral("Successfully joined room \"%1\".").arg(currentRoomId), 3000);
 
             meetingRole = MeetingRole::Guest;
             meetingState = MeetingState::InMeeting;
@@ -1802,10 +1847,10 @@ void MainWindow::on_btnJoinRoom_clicked()
                               false);
 
             appendChatMessage(QStringLiteral("System"),
-                              QStringLiteral("You joined the meeting"),
+                              QStringLiteral("You joined room \"%1\"").arg(currentRoomId),
                               false);
 
-            appendLogMessage(QStringLiteral("控制连接握手成功，已加入会议"));
+            appendLogMessage(QStringLiteral("控制连接握手成功，已加入房间 %1").arg(currentRoomId));
             startClientMediaTransports();
             broadcastLocalMediaState();
 
@@ -1818,9 +1863,9 @@ void MainWindow::on_btnJoinRoom_clicked()
 
         connect(client, &ControlClient::disconnected, this, [this]() {
             appendChatMessage(QStringLiteral("System"),
-                              QStringLiteral("Disconnected from host"),
+                              QStringLiteral("Disconnected from host (room \"%1\")").arg(currentRoomId),
                               false);
-            appendLogMessage(QStringLiteral("检测到控制连接断开，重置会议状态"));
+            appendLogMessage(QStringLiteral("检测到控制连接断开，重置会议状态（房间 %1）").arg(currentRoomId));
             resetMeetingState();
         });
 
@@ -1836,18 +1881,20 @@ void MainWindow::on_btnJoinRoom_clicked()
                 });
     }
 
+    client->setRoomId(currentRoomId);
+    appendLogMessage(QStringLiteral("尝试加入房间 %1，主机 %2").arg(currentRoomId, ip));
     client->connectToHost(ip, Config::CONTROL_PORT);
     meetingRole = MeetingRole::Guest;
     meetingState = MeetingState::Connecting;
 
-    statusBar()->showMessage(QStringLiteral("Joining meeting..."), 3000);
+    statusBar()->showMessage(QStringLiteral("Joining room \"%1\"...").arg(currentRoomId), 3000);
     updateMeetingStatusLabel();
     updateControlsForMeetingState();
 }
 
 void MainWindow::on_btnLeaveRoom_clicked()
 {
-    appendLogMessage(QStringLiteral("用户点击离开会议"));
+    appendLogMessage(QStringLiteral("用户点击离开会议（房间 %1）").arg(currentRoomId));
 
     if (meetingRole == MeetingRole::None && meetingState == MeetingState::Idle) {
         appendLogMessage(QStringLiteral("离开会议请求被忽略：当前不在会议中"));
@@ -1866,7 +1913,7 @@ void MainWindow::on_btnLeaveRoom_clicked()
     }
 
     appendChatMessage(QStringLiteral("System"),
-                      QStringLiteral("You left the meeting"),
+                      QStringLiteral("You left the meeting (room \"%1\")").arg(currentRoomId),
                       false);
 
     if (meetingRole == MeetingRole::Host && server) {
@@ -1906,7 +1953,7 @@ void MainWindow::on_btnSendChat_clicked()
     appendChatMessage(QStringLiteral("Me"), text, true);
 
     if (meetingRole == MeetingRole::Host && server) {
-        server->sendChatToAll(text);
+        server->sendChatToAll(text, currentRoomId);
     } else if (meetingRole == MeetingRole::Guest && client) {
         client->sendChatMessage(text);
     }
