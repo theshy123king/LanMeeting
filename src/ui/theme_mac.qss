@@ -17,19 +17,19 @@ QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
     border: 1px solid #A9C6E8;
     border-radius: 10px;
     padding: 6px 10px;
-    color: #0054A6;
+    color: #003A7A;
 }
 
 QPushButton:hover, QToolButton:hover {
     background: #EAF4FF;
     border-color: #95B8E1;
-    color: #0054A6;
+    color: #003A7A;
 }
 
 QPushButton:pressed, QToolButton:pressed {
     background: #D5E8FF;
     border-color: #80ABDB;
-    color: #0054A6;
+    color: #003A7A;
 }
 
 QPushButton:checked, QToolButton:checked {
@@ -44,7 +44,7 @@ QToolButton:disabled,
 QToolButton[enabled="false"] {
     background: rgba(228, 240, 255, 0.4);
     border: 1px solid rgba(169, 198, 232, 0.4);
-    color: rgba(0, 84, 166, 0.4);
+    color: rgba(0, 58, 122, 0.4);
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
