@@ -31,6 +31,7 @@ set(PROJECT_SOURCES
         src/ui/ChatMessageWidget.h
         src/ui/ScreenShareWidget.cpp
         src/ui/ScreenShareWidget.h
+        src/ui/theme.qrc
         src/audio/AudioEngine.cpp
         src/audio/AudioEngine.h
         src/audio/AudioTransport.cpp

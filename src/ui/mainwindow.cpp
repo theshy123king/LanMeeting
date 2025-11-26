@@ -29,6 +29,7 @@
 #include <QTextStream>
 #include <QDataStream>
 #include <QStringConverter>
+#include <QFile>
 
 #include "common/Config.h"
 #include "ScreenShareWidget.h"
@@ -102,6 +103,13 @@ MainWindow::MainWindow(QWidget *parent)
             currentRoomId = resolvedRoomIdFromInput();
             updateMeetingStatusLabel();
         });
+    }
+
+    // Apply macOS/iOS style sheet
+    QFile qssFile(QStringLiteral(":/theme_mac.qss"));
+    if (qssFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString qss = QString::fromUtf8(qssFile.readAll());
+        qApp->setStyleSheet(qss);
     }
 
     initLayout();

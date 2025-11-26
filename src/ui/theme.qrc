@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>theme_mac.qss</file>
+    </qresource>
+</RCC>
