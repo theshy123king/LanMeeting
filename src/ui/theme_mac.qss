@@ -1,33 +1,33 @@
 /* macOS-inspired layered light theme */
 
 QWidget {
-    background: #F2F2F7;
+    background: #EDEDED;
     color: #1C1C1E;
     selection-background-color: rgba(0, 122, 255, 0.18);
 }
 
 QFrame, QListWidget, QPlainTextEdit, QTextEdit, QTabWidget::pane {
     background: #FFFFFF;
-    border: 1px solid rgba(60, 60, 67, 0.12);
+    border: 1px solid #D1D1D6;
     border-radius: 12px;
 }
 
 QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
-    background: #F4F4F6;
-    border: 1px solid rgba(60, 60, 67, 0.18);
+    background: #E5E5EA;
+    border: 1px solid #D1D1D6;
     border-radius: 10px;
     padding: 6px 10px;
     color: #1C1C1E;
 }
 
 QPushButton:hover, QToolButton:hover {
-    background: #ffffff;
-    border-color: rgba(0, 122, 255, 0.35);
+    background: #F2F2F7;
+    border-color: #C7C7CC;
 }
 
 QPushButton:pressed, QToolButton:pressed {
-    background: #E5E5EA;
-    border-color: rgba(0, 122, 255, 0.45);
+    background: #D1D1D6;
+    border-color: #AFAFB4;
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
@@ -36,20 +36,20 @@ QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
 
 QStatusBar {
     background: #FFFFFF;
-    border-top: 1px solid rgba(60, 60, 67, 0.12);
+    border-top: 1px solid #D1D1D6;
 }
 
 QToolTip {
     background: #FFFFFF;
-    border: 1px solid rgba(60, 60, 67, 0.15);
+    border: 1px solid #D1D1D6;
     border-radius: 8px;
     color: #1C1C1E;
     padding: 6px;
 }
 
 QTabBar::tab {
-    background: #F4F4F6;
-    border: 1px solid rgba(60, 60, 67, 0.15);
+    background: #E5E5EA;
+    border: 1px solid #D1D1D6;
     border-bottom: none;
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
@@ -59,7 +59,7 @@ QTabBar::tab {
 
 QTabBar::tab:selected {
     background: #FFFFFF;
-    border-color: rgba(0, 122, 255, 0.35);
+    border-color: #C7C7CC;
     color: #000000;
 }
 
@@ -77,7 +77,7 @@ QScrollBar::handle {
 }
 
 #floatingControlBar {
-    background: #FFFFFF;
-    border: 1px solid rgba(60, 60, 67, 0.18);
+    background: #D1D1D6;
+    border: 1px solid #AFAFB4;
     border-radius: 12px;
 }
