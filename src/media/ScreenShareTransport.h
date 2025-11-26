@@ -89,6 +89,7 @@ signals:
                            quint32 frameId);
     void requestCapture();
     void statusTextChanged(const QString &text);
+    void qualitySample(qint64 bytesPerSec, int effectiveFps, const QString &tierLabel);
 
 private slots:
     void onSendTimer();

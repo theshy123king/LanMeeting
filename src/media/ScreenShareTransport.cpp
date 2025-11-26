@@ -551,6 +551,7 @@ void ScreenShareTransport::onBandwidthSample(qint64 bytesPerSec)
                                ? QStringLiteral("throttled for bandwidth")
                                : QString();
     updateStatusText(m_currentTierLabel, reason);
+    emit qualitySample(recent, m_effectiveFps, m_currentTierLabel);
 
     LOG_INFO(QStringLiteral("ScreenShare diag: level=%1 tier=%2 fps=%3 eff=%4 cap=%5x%6 jpegQ=%7 bytes=%8 util=%.2f")
                  .arg(m_qualityLevel)
@@ -638,6 +639,7 @@ void ScreenShareTransport::onFrameReady(const QByteArray &jpeg, int /*width*/, i
 
     emit encodedFrameReady(jpeg, m_destIps, m_remotePort, frameId);
     m_lastFrameSentMs = nowMs;
+    emit qualitySample(m_lastBandwidthSample, m_effectiveFps, m_currentTierLabel);
 }
 
 void ScreenShareTransport::onSendTimer()

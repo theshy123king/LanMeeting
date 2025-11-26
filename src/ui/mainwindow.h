@@ -113,6 +113,7 @@ private:
     void initHostAudioMixer();
     void onScreenShareFrameReceived(const QImage &image);
     void updateScreenSharePixmap();
+    void updateQualityPanel();
     QString localParticipantKey() const;
     QString hostParticipantKey() const;
     void upsertParticipant(const QString &key,
@@ -202,6 +203,13 @@ private:
     bool recordingScreen;
     QString screenRecordDir;
     bool screenRecordAsPng;
+    int audioPacketsThisSecond = 0;
+    int videoFramesThisSecond = 0;
+    int screenFramesThisSecond = 0;
+    qint64 lastPingMs = -1;
+    qint64 lastBandwidthBytes = 0;
+    QString lastTier;
+    QTimer *qualityTimer = nullptr;
     QMap<QString, ParticipantInfo> participantInfos;
     QStringList participantOrder;
     QImage lastScreenShareFrame;

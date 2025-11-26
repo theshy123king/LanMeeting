@@ -234,6 +234,15 @@ MainWindow::MainWindow(QWidget *parent)
                     screenShareOverlayLabel->setToolTip(text);
                 }
             });
+    connect(screenShare,
+            &ScreenShareTransport::qualitySample,
+            this,
+            [this](qint64 bytes, int effFps, const QString &tier) {
+                lastBandwidthBytes = bytes;
+                screenFramesThisSecond = effFps; // treat effective fps as current
+                lastTier = tier;
+                updateQualityPanel();
+            });
 
     // Guest 侧音视频 / 屏幕共享超时与自动重连相关定时器
     guestReconnectTimer = new QTimer(this);
@@ -696,6 +705,7 @@ void MainWindow::onScreenShareFrameReceived(const QImage &image)
     }
 
     lastScreenShareFrame = image;
+    screenFramesThisSecond++;
 
     // 屏幕共享显示时隐藏摄像头视频控件，保证两者互斥显示、不会叠加绘制。
     if (videoNet) {
@@ -776,6 +786,45 @@ void MainWindow::updateScreenSharePixmap()
     screenShareOverlayLabel->setText(QString());
 }
 
+void MainWindow::updateQualityPanel()
+{
+    if (!qualityTimer) {
+        qualityTimer = new QTimer(this);
+        qualityTimer->setInterval(1000);
+        connect(qualityTimer, &QTimer::timeout, this, [this]() {
+            audioPacketsThisSecond = 0;
+            videoFramesThisSecond = 0;
+            screenFramesThisSecond = 0;
+        });
+        qualityTimer->start();
+    }
+
+    const QString pingText = (lastPingMs >= 0)
+                                 ? QStringLiteral("Ping: %1 ms").arg(lastPingMs)
+                                 : QStringLiteral("Ping: -");
+    const QString audioText = QStringLiteral("Audio FPS: %1").arg(audioPacketsThisSecond);
+    const QString videoText = QStringLiteral("Video FPS: %1").arg(videoFramesThisSecond);
+    const QString screenText = QStringLiteral("Screen FPS: %1").arg(screenFramesThisSecond);
+    const QString bwText = lastBandwidthBytes > 0
+                               ? QStringLiteral("Bandwidth: %1 KB/s").arg(lastBandwidthBytes / 1024)
+                               : QStringLiteral("Bandwidth: -");
+    const QString tierText = lastTier.isEmpty() ? QStringLiteral("Tier: -")
+                                                : QStringLiteral("Tier: %1").arg(lastTier);
+    QString warnText = QStringLiteral("Warnings: ");
+    if (lastPingMs > 150 || lastBandwidthBytes > Config::SCREEN_SHARE_MAX_BYTES_PER_SEC) {
+        warnText += QStringLiteral("Network congestion");
+    } else {
+        warnText += QStringLiteral("none");
+    }
+
+    if (ui->lblQualityPing) ui->lblQualityPing->setText(pingText);
+    if (ui->lblQualityAudio) ui->lblQualityAudio->setText(audioText);
+    if (ui->lblQualityVideo) ui->lblQualityVideo->setText(videoText);
+    if (ui->lblQualityScreen) ui->lblQualityScreen->setText(screenText);
+    if (ui->lblQualityBandwidth) ui->lblQualityBandwidth->setText(bwText);
+    if (ui->lblQualityTier) ui->lblQualityTier->setText(tierText);
+    if (ui->lblQualityWarning) ui->lblQualityWarning->setText(warnText);
+}
 void MainWindow::appendLogMessage(const QString &message)
 {
     const QString timestamp =
@@ -1060,19 +1109,26 @@ void MainWindow::exportChatLog()
         screenShare->stopReceiver();
     }
 
-      if (screenShareHideTimer) {
-          screenShareHideTimer->stop();
-      }
-      if (screenShareOverlayLabel) {
-          screenShareOverlayLabel->hide();
-          screenShareOverlayLabel->setPixmap(QPixmap());
-          screenShareOverlayLabel->setText(QString());
-      }
-      screenShareOverlayLabel = nullptr;
+    if (screenShareHideTimer) {
+        screenShareHideTimer->stop();
+    }
+    if (screenShareOverlayLabel) {
+        screenShareOverlayLabel->hide();
+        screenShareOverlayLabel->setPixmap(QPixmap());
+        screenShareOverlayLabel->setText(QString());
+    }
+    screenShareOverlayLabel = nullptr;
     lastScreenShareFrame = QImage();
 
     updateMeetingStatusLabel();
     updateControlsForMeetingState();
+    audioPacketsThisSecond = 0;
+    videoFramesThisSecond = 0;
+    screenFramesThisSecond = 0;
+    lastPingMs = -1;
+    lastBandwidthBytes = 0;
+    lastTier.clear();
+    updateQualityPanel();
 }
 
 void MainWindow::startClientMediaTransports()
@@ -1341,6 +1397,7 @@ void MainWindow::initHostVideoReceiver()
             }
 
             if (!image.isNull()) {
+                videoFramesThisSecond++;
                 label->setPixmap(QPixmap::fromImage(image).scaled(label->size(),
                                                                   Qt::KeepAspectRatio,
                                                                   Qt::SmoothTransformation));
@@ -1401,6 +1458,7 @@ void MainWindow::initHostVideoReceiver()
               if (datagram.isEmpty()) {
                   continue;
               }
+              audioPacketsThisSecond++;
               packets.push_back(datagram);
               if (datagram.size() > maxSize) {
                   maxSize = datagram.size();
@@ -2161,6 +2219,10 @@ void MainWindow::on_btnJoinRoom_clicked()
                 [this](const QString &ip, bool micMuted, bool cameraEnabled) {
                     updateParticipantMediaStateByIp(ip, micMuted, cameraEnabled);
                 });
+        connect(client, &ControlClient::pingRoundTrip, this, [this](qint64 ms) {
+            lastPingMs = ms;
+            updateQualityPanel();
+        });
     }
 
     client->setRoomId(currentRoomId);

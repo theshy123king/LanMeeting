@@ -30,6 +30,7 @@ signals:
     void chatReceived(const QString &message);
     void mediaStateUpdated(const QString &ip, bool micMuted, bool cameraEnabled);
     void screenShareStateUpdated(const QString &ip, bool sharing);
+    void pingRoundTrip(qint64 ms);
 
 private slots:
     void onConnected();

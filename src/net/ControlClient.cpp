@@ -134,6 +134,7 @@ void ControlClient::onReadyRead()
                 m_lastPongMs = now;
                 LOG_INFO(QStringLiteral("ControlClient heartbeat: pong age=%1ms health=ok")
                              .arg(age));
+                emit pingRoundTrip(age);
             }
         } else if (line.startsWith(QByteArrayLiteral("STATE:"))) {
             // Examples:
