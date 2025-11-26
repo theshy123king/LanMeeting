@@ -1,34 +1,66 @@
-/* macOS / iOS inspired light theme */
+/* macOS-inspired layered light theme */
+
 QWidget {
-    background: rgba(255, 255, 255, 0.7);
-    color: #3c3c43;
-    selection-background-color: rgba(0, 122, 255, 0.2);
+    background: #F2F2F7;
+    color: #1C1C1E;
+    selection-background-color: rgba(0, 122, 255, 0.18);
+}
+
+QFrame, QListWidget, QPlainTextEdit, QTextEdit, QTabWidget::pane {
+    background: #FFFFFF;
+    border: 1px solid rgba(60, 60, 67, 0.12);
+    border-radius: 12px;
 }
 
 QPushButton, QToolButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
-    background: rgba(255, 255, 255, 0.6);
-    border: 1px solid rgba(60, 60, 67, 0.12);
+    background: #F4F4F6;
+    border: 1px solid rgba(60, 60, 67, 0.18);
     border-radius: 10px;
     padding: 6px 10px;
+    color: #1C1C1E;
 }
 
 QPushButton:hover, QToolButton:hover {
-    border-color: rgba(0, 122, 255, 0.3);
+    background: #ffffff;
+    border-color: rgba(0, 122, 255, 0.35);
 }
 
 QPushButton:pressed, QToolButton:pressed {
-    background: rgba(0, 122, 255, 0.15);
-    border-color: rgba(0, 122, 255, 0.4);
+    background: #E5E5EA;
+    border-color: rgba(0, 122, 255, 0.45);
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
-    background: rgba(255, 255, 255, 0.8);
+    background: #FFFFFF;
 }
 
-QListWidget, QPlainTextEdit, QTextEdit {
-    background: rgba(255, 255, 255, 0.8);
-    border: 1px solid rgba(60, 60, 67, 0.12);
-    border-radius: 10px;
+QStatusBar {
+    background: #FFFFFF;
+    border-top: 1px solid rgba(60, 60, 67, 0.12);
+}
+
+QToolTip {
+    background: #FFFFFF;
+    border: 1px solid rgba(60, 60, 67, 0.15);
+    border-radius: 8px;
+    color: #1C1C1E;
+    padding: 6px;
+}
+
+QTabBar::tab {
+    background: #F4F4F6;
+    border: 1px solid rgba(60, 60, 67, 0.15);
+    border-bottom: none;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    padding: 8px 14px;
+    color: #1C1C1E;
+}
+
+QTabBar::tab:selected {
+    background: #FFFFFF;
+    border-color: rgba(0, 122, 255, 0.35);
+    color: #000000;
 }
 
 QScrollBar:vertical, QScrollBar:horizontal {
@@ -40,35 +72,12 @@ QScrollBar:vertical, QScrollBar:horizontal {
 }
 
 QScrollBar::handle {
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.24);
     border-radius: 5px;
 }
 
-QTabBar::tab {
-    background: rgba(255, 255, 255, 0.7);
-    border: 1px solid rgba(60, 60, 67, 0.12);
-    border-bottom: none;
-    border-top-left-radius: 10px;
-    border-top-right-radius: 10px;
-    padding: 6px 12px;
-    color: #3c3c43;
-}
-
-QTabBar::tab:selected {
-    background: rgba(255, 255, 255, 0.95);
-    border-color: rgba(0, 122, 255, 0.35);
-    color: #1c1c1e;
-}
-
-QStatusBar {
-    background: rgba(255, 255, 255, 0.6);
-    border-top: 1px solid rgba(60, 60, 67, 0.12);
-}
-
-QToolTip {
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(60, 60, 67, 0.12);
-    border-radius: 8px;
-    color: #1c1c1e;
-    padding: 6px;
+#floatingControlBar {
+    background: #FFFFFF;
+    border: 1px solid rgba(60, 60, 67, 0.18);
+    border-radius: 12px;
 }
