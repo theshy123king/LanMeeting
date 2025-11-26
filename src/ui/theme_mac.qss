@@ -38,10 +38,13 @@ QPushButton:checked, QToolButton:checked {
     color: #FFFFFF;
 }
 
-QPushButton:disabled, QToolButton:disabled {
-    background: #F0F0F0;
-    border: 1px solid #D1D1D6;
-    color: #7A7A7A;
+QPushButton:disabled,
+QPushButton[enabled="false"],
+QToolButton:disabled,
+QToolButton[enabled="false"] {
+    background: #E5E5EA;
+    border: 1px solid #C7C7CC;
+    color: #6A6A6A;
 }
 
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
